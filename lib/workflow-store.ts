@@ -1460,6 +1460,18 @@ async getMOCById(id: string) {
     const gate = data?.moc_gates?.[0];
     const documents = gate?.moc_pack_documents || [];
 
+    let contractorSignature: string | null = null;
+
+if (gate?.acknowledged_by) {
+  const { data: signatureRow } = await supabase
+    .from('user_signatures')
+    .select('signature_url')
+    .eq('user_id', gate.acknowledged_by)
+    .single();
+
+  contractorSignature = signatureRow?.signature_url || null;
+}
+
     console.log("RAW GATE:", gate);
     console.log("ACK USER:", gate?.acknowledged_user);
     console.log("ACK CONTRACTOR:", gate?.acknowledged_user?.contractor);
@@ -1478,7 +1490,7 @@ async getMOCById(id: string) {
               gate?.acknowledged_by,
             submittedAt: gate.acknowledged_at,
             supervisorName: gate.supervisor_name,
-            signature: gate.signature_url,
+            signature: contractorSignature,
             supervisorPhone: gate.supervisor_phone,
             supervisorEmail: gate.supervisor_email,
             supervisorIdPassport: gate.supervisor_id,

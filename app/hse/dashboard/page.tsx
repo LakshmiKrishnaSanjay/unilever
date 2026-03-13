@@ -48,32 +48,22 @@ export default function HSEDashboardPage() {
     }
   };
 
-  const stats = useMemo(() => {
-    return {
-      pendingMOCs: mocs.filter(
-        (m) =>
-          m.status === 'SUBMITTED' ||
-          m.status === 'STAKEHOLDER_SIGNED' ||
-          m.status === 'CONTRACTOR_SUBMITTED'
-      ).length,
-      approvedMOCs: mocs.filter((m) => m.status === 'APPROVED').length,
-      ptwsInReview: ptws.filter((p) => p.status === 'PENDING_HSE_APPROVAL').length,
-      activePTWs: ptws.filter((p) => p.status === 'ACTIVE').length,
-      pendingClosure: ptws.filter((p) => p.status === 'PENDING_HSE_CLOSURE').length,
-      totalThisMonth: ptws.length,
-    };
-  }, [mocs, ptws]);
+const stats = useMemo(() => {
+  return {
+    pendingMOCs: mocs.filter((m) => m.status !== 'APPROVED').length,
+    approvedMOCs: mocs.filter((m) => m.status === 'APPROVED').length,
 
-  const pendingMOCs = useMemo(
-    () =>
-      mocs.filter(
-        (m) =>
-          m.status === 'SUBMITTED' ||
-          m.status === 'STAKEHOLDER_SIGNED' ||
-          m.status === 'CONTRACTOR_SUBMITTED'
-      ),
-    [mocs]
-  );
+    ptwsInReview: ptws.filter((p) => p.status === 'PENDING_HSE_APPROVAL').length,
+    activePTWs: ptws.filter((p) => p.status === 'ACTIVE').length,
+    pendingClosure: ptws.filter((p) => p.status === 'PENDING_HSE_CLOSURE').length,
+    totalThisMonth: ptws.length,
+  };
+}, [mocs, ptws]);
+
+const pendingMOCs = useMemo(
+  () => (mocs ?? []).filter((m) => m.status !== 'APPROVED'),
+  [mocs]
+);
 
   const ptwsForReview = useMemo(
     () => ptws.filter((p) => p.status === 'PENDING_HSE_APPROVAL'),
@@ -162,68 +152,106 @@ export default function HSEDashboardPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>MOC Status Overview</CardTitle>
-                <Badge variant="outline">{pendingMOCs.length}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
-              ) : pendingMOCs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No pending MOCs</p>
-              ) : (
-                <div className="space-y-3">
-                  {pendingMOCs.slice(0, 3).map((moc: any) => {
-                    const awaitingContractor =
-                      (moc.status === 'SUBMITTED' || moc.status === 'STAKEHOLDER_SIGNED') &&
-                      !moc.contractorGate?.acknowledged;
+<Card>
+  <CardHeader>
+    <div className="flex items-center justify-between">
+      <CardTitle>MOC Status Overview</CardTitle>
+      <Badge variant="outline">{pendingMOCs.length}</Badge>
+    </div>
+  </CardHeader>
+  <CardContent>
+    {loading ? (
+      <p className="text-sm text-muted-foreground">Loading...</p>
+    ) : pendingMOCs.length === 0 ? (
+      <p className="text-sm text-muted-foreground">No pending MOCs</p>
+    ) : (
+      <div className="space-y-3">
+        {pendingMOCs.slice(0, 3).map((moc: any) => {
+          const awaitingContractor =
+            (moc.status === 'SUBMITTED' || moc.status === 'STAKEHOLDER_SIGNED') &&
+            !moc.contractorGate?.acknowledged;
 
-                    return (
-                      <Link key={moc.id} href={`/moc/${moc.id}`}>
-                        <div className="flex items-start justify-between rounded-lg border p-3 transition-colors hover:bg-muted">
-                          <div className="flex-1">
-                            <p className="font-medium">{moc.title}</p>
-                            <p className="text-sm text-muted-foreground">{moc.id}</p>
+          const isFacilitiesReview =
+            moc.status === 'CONTRACTOR_SUBMITTED';
 
-                            {awaitingContractor && (
-                              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                                <Clock className="mr-1 inline h-3 w-3" />
-                                Awaiting contractor acknowledgement
-                              </p>
-                            )}
+          const isStakeholderReview =
+            moc.status === 'PENDING_STAKEHOLDER_APPROVAL';
 
-                            {moc.status === 'CONTRACTOR_SUBMITTED' && (
-                              <p className="mt-1 text-xs text-blue-600 dark:text-blue-400">
-                                <Clock className="mr-1 inline h-3 w-3" />
-                                Ready for Facilities review
-                              </p>
-                            )}
-                          </div>
+          const isHSEReview =
+            moc.status === 'PENDING_HSE_APPROVAL' ||
+            moc.status === 'PENDING_HSE_FINAL';
 
-                          <Badge
-                            variant={
-                              moc.status === 'CONTRACTOR_SUBMITTED' ? 'default' : 'secondary'
-                            }
-                          >
-                            {String(moc.status).replace(/_/g, ' ')}
-                          </Badge>
-                        </div>
-                      </Link>
-                    );
-                  })}
+          const isChangesRequested =
+            moc.status === 'FACILITIES_CHANGES_REQUESTED';
 
-                  {pendingMOCs.length > 3 && (
-                    <Button variant="outline" className="w-full bg-transparent" asChild>
-                      <Link href="/moc">View All MOCs</Link>
-                    </Button>
+          return (
+            <Link key={moc.id} href={`/moc/${moc.id}`}>
+              <div className="flex items-start justify-between rounded-lg border p-3 transition-colors hover:bg-muted">
+                <div className="flex-1">
+                  <p className="font-medium">{moc.title}</p>
+                  <p className="text-sm text-muted-foreground">{moc.id}</p>
+
+                  {awaitingContractor && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      <Clock className="mr-1 inline h-3 w-3" />
+                      Awaiting contractor acknowledgement
+                    </p>
+                  )}
+
+                  {isFacilitiesReview && (
+                    <p className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                      <Clock className="mr-1 inline h-3 w-3" />
+                      Ready for Facilities review
+                    </p>
+                  )}
+
+                  {isStakeholderReview && (
+                    <p className="mt-1 text-xs text-purple-600 dark:text-purple-400">
+                      <Clock className="mr-1 inline h-3 w-3" />
+                      Awaiting stakeholder approval
+                    </p>
+                  )}
+
+                  {isHSEReview && (
+                    <p className="mt-1 text-xs text-green-600 dark:text-green-400">
+                      <Clock className="mr-1 inline h-3 w-3" />
+                      Awaiting HSE approval
+                    </p>
+                  )}
+
+                  {isChangesRequested && (
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                      <Clock className="mr-1 inline h-3 w-3" />
+                      Changes requested by Facilities
+                    </p>
                   )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
+
+                <Badge
+                  variant={
+                    moc.status === 'CONTRACTOR_SUBMITTED' ||
+                    moc.status === 'PENDING_HSE_APPROVAL' ||
+                    moc.status === 'PENDING_HSE_FINAL'
+                      ? 'default'
+                      : 'secondary'
+                  }
+                >
+                  {String(moc.status).replace(/_/g, ' ')}
+                </Badge>
+              </div>
+            </Link>
+          );
+        })}
+
+        {pendingMOCs.length > 3 && (
+          <Button variant="outline" className="w-full bg-transparent" asChild>
+            <Link href="/moc">View All MOCs</Link>
+          </Button>
+        )}
+      </div>
+    )}
+  </CardContent>
+</Card>
 
           <Card>
             <CardHeader>

@@ -49,12 +49,19 @@ export default function SecurityDashboardPage() {
     fetchDashboardData();
   }, []);
 
-  const stats = {
-    pendingReviews: ptws.filter((p) => p.status === 'PENDING_SECURITY_REVIEW').length,
-    activePTWs: ptws.filter((p) => p.status === 'ACTIVE').length,
-    readyToStart: ptws.filter((p) => p.status === 'READY_FOR_ENTRY').length,
-    totalLogs: securityLogs.length,
-  };
+  const checkedInActivePTWs = ptws.filter(
+  (p) =>
+    p.status === 'ACTIVE' &&
+    !!p.entry_approved_by &&
+    !p.security_checkout_confirmed_by
+);
+
+const stats = {
+  pendingReviews: ptws.filter((p) => p.status === 'PENDING_SECURITY_REVIEW').length,
+  activePTWs: ptws.filter((p) => p.status === 'ACTIVE').length,
+  readyToStart: checkedInActivePTWs.length,
+  totalLogs: securityLogs.length,
+};
 
   const pendingPTWs = ptws.filter((p) => p.status === 'PENDING_SECURITY_REVIEW');
   const activePTWs = ptws.filter((p) => p.status === 'ACTIVE');

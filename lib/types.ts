@@ -217,6 +217,8 @@ export interface SupportingPermit {
 }
 
 export interface PTW {
+  security_checkout_confirmed_by: any;
+  entry_approved_by: any;
   sent_back_from_stage: string;
   id: string;
 

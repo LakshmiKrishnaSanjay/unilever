@@ -442,6 +442,9 @@ const isPendingHSEApproval = moc.status === 'PENDING_HSE_APPROVAL' || moc.status
   console.log('DETAIL PAGE STATUS:', moc?.status);
 console.log('DETAIL PAGE ROLE:', currentUser?.role);
 console.log('SHOW CREATE PTW:', moc?.status === 'APPROVED' && currentUser?.role === 'contractor_admin');
+
+console.log('contractorGate:', moc?.contractorGate);
+console.log('contractor signature:', moc?.contractorGate?.signature);
   
 
   return (

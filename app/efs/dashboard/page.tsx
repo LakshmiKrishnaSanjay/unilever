@@ -11,7 +11,8 @@ import { supabase } from '@/lib/supabase-client';
 import type { PTW } from '@/lib/types';
 
 export default function EFSDashboardPage() {
-  const [ptws, setPtws] = useState<PTW[]>([]);
+  const [pendingReviews, setPendingReviews] = useState<PTW[]>([]);
+  const [pendingClosures, setPendingClosures] = useState<PTW[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,16 +22,25 @@ export default function EFSDashboardPage() {
         setLoading(true);
         setError(null);
 
-        const { data, error } = await supabase
-          .from('ptws')
-          .select('*')
-          .order('created_at', { ascending: false });
+        const [reviewRes, closureRes] = await Promise.all([
+          supabase
+            .from('ptws')
+            .select('*')
+            .eq('status', 'PENDING_EFS_REVIEW')
+            .order('created_at', { ascending: false }),
 
-        if (error) {
-          throw error;
-        }
+          supabase
+            .from('ptws')
+            .select('*')
+            .eq('status', 'PENDING_EFS_CLOSURE')
+            .order('created_at', { ascending: false }),
+        ]);
 
-        setPtws((data || []) as PTW[]);
+        if (reviewRes.error) throw reviewRes.error;
+        if (closureRes.error) throw closureRes.error;
+
+        setPendingReviews((reviewRes.data || []) as PTW[]);
+        setPendingClosures((closureRes.data || []) as PTW[]);
       } catch (err: any) {
         console.error('Failed to fetch EFS dashboard PTWs:', err);
         setError(err.message || 'Failed to load permits');
@@ -42,15 +52,14 @@ export default function EFSDashboardPage() {
     fetchPTWs();
   }, []);
 
-  const pendingReviews = ptws.filter((p) => p.status === 'PENDING_EFS_REVIEW');
-  const pendingClosures = ptws.filter((p) => p.status === 'WORK_COMPLETED');
-
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-semibold">EFS Team Dashboard</h1>
-          <p className="text-muted-foreground">Review engineering and facility systems permits</p>
+          <p className="text-muted-foreground">
+            Review engineering and facility systems permits
+          </p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -60,7 +69,9 @@ export default function EFSDashboardPage() {
               <Clock className="h-4 w-4 text-warning" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{loading ? '...' : pendingReviews.length}</div>
+              <div className="text-2xl font-bold">
+                {loading ? '...' : pendingReviews.length}
+              </div>
               <p className="text-xs text-muted-foreground">Awaiting EFS review</p>
             </CardContent>
           </Card>
@@ -71,8 +82,10 @@ export default function EFSDashboardPage() {
               <Clock className="h-4 w-4 text-warning" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{loading ? '...' : pendingClosures.length}</div>
-              <p className="text-xs text-muted-foreground">Awaiting closure review</p>
+              <div className="text-2xl font-bold">
+                {loading ? '...' : pendingClosures.length}
+              </div>
+              <p className="text-xs text-muted-foreground">Awaiting EFS closure review</p>
             </CardContent>
           </Card>
         </div>
@@ -145,9 +158,9 @@ export default function EFSDashboardPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary">Work Completed</Badge>
+                      <Badge variant="secondary">Pending EFS Closure</Badge>
                       <Button size="sm" asChild>
-                        <Link href={`/ptw/${ptw.id}`}>Review Closure</Link>
+                        <Link href="/efs/closure">Review Closure</Link>
                       </Button>
                     </div>
                   </div>
