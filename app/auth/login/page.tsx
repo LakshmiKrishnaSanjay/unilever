@@ -22,7 +22,7 @@ type Role =
   | 'viewer';
 
 const roleDashboards: Record<Role, string> = {
-  super_admin: '/admin/dashboard',
+  super_admin: '/dashboard/super_admin',
   hse_manager: '/hse/dashboard',
   stakeholder: '/stakeholder/dashboard',
   facilities: '/facilities/dashboard',

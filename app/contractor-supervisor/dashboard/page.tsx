@@ -242,7 +242,7 @@ export default function ContractorSupervisorDashboardPage() {
 
         {!loading && (
           <>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Active MOCs</CardTitle>
@@ -287,16 +287,7 @@ export default function ContractorSupervisorDashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Corrections Required</CardTitle>
-                  <AlertCircle className="h-4 w-4 text-destructive" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.sentBackPTWs}</div>
-                  <p className="text-xs text-muted-foreground">Needs supervisor action</p>
-                </CardContent>
-              </Card>
+
             </div>
 
             {mocsNeedingAcknowledgement.length > 0 && (

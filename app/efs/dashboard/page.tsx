@@ -1,17 +1,49 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useWorkflow } from '@/lib/use-workflow';
 import Link from 'next/link';
 import { Clock } from 'lucide-react';
+import { supabase } from '@/lib/supabase-client';
+import type { PTW } from '@/lib/types';
 
 export default function EFSDashboardPage() {
-  const { ptws = [] } = useWorkflow();
-  const pendingReviews = (ptws ?? []).filter((p) => p.status === 'PENDING_EFS_REVIEW');
-  const pendingClosures = (ptws ?? []).filter((p) => p.status === 'WORK_COMPLETED');
+  const [ptws, setPtws] = useState<PTW[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchPTWs = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const { data, error } = await supabase
+          .from('ptws')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          throw error;
+        }
+
+        setPtws((data || []) as PTW[]);
+      } catch (err: any) {
+        console.error('Failed to fetch EFS dashboard PTWs:', err);
+        setError(err.message || 'Failed to load permits');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPTWs();
+  }, []);
+
+  const pendingReviews = ptws.filter((p) => p.status === 'PENDING_EFS_REVIEW');
+  const pendingClosures = ptws.filter((p) => p.status === 'WORK_COMPLETED');
 
   return (
     <DashboardLayout>
@@ -28,17 +60,18 @@ export default function EFSDashboardPage() {
               <Clock className="h-4 w-4 text-warning" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{pendingReviews.length}</div>
+              <div className="text-2xl font-bold">{loading ? '...' : pendingReviews.length}</div>
               <p className="text-xs text-muted-foreground">Awaiting EFS review</p>
             </CardContent>
           </Card>
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Pending Closures</CardTitle>
               <Clock className="h-4 w-4 text-warning" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{pendingClosures.length}</div>
+              <div className="text-2xl font-bold">{loading ? '...' : pendingClosures.length}</div>
               <p className="text-xs text-muted-foreground">Awaiting closure review</p>
             </CardContent>
           </Card>
@@ -48,11 +81,15 @@ export default function EFSDashboardPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Review Queue</CardTitle>
-              <Badge variant="outline">{pendingReviews.length}</Badge>
+              <Badge variant="outline">{loading ? '...' : pendingReviews.length}</Badge>
             </div>
           </CardHeader>
           <CardContent>
-            {pendingReviews.length === 0 ? (
+            {loading ? (
+              <p className="text-sm text-muted-foreground">Loading permits...</p>
+            ) : error ? (
+              <p className="text-sm text-red-500">{error}</p>
+            ) : pendingReviews.length === 0 ? (
               <p className="text-sm text-muted-foreground">No permits awaiting review</p>
             ) : (
               <div className="space-y-3">
@@ -70,7 +107,7 @@ export default function EFSDashboardPage() {
                     <div className="flex items-center gap-2">
                       <Badge>{ptw.permit_type}</Badge>
                       <Button size="sm" asChild>
-                        <Link href={`/efs/review`}>Review</Link>
+                        <Link href={`/efs/review?ptwId=${ptw.id}`}>Review</Link>
                       </Button>
                     </div>
                   </div>
@@ -84,11 +121,15 @@ export default function EFSDashboardPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Job Closure Reviews</CardTitle>
-              <Badge variant="outline">{pendingClosures.length}</Badge>
+              <Badge variant="outline">{loading ? '...' : pendingClosures.length}</Badge>
             </div>
           </CardHeader>
           <CardContent>
-            {pendingClosures.length === 0 ? (
+            {loading ? (
+              <p className="text-sm text-muted-foreground">Loading closure queue...</p>
+            ) : error ? (
+              <p className="text-sm text-red-500">{error}</p>
+            ) : pendingClosures.length === 0 ? (
               <p className="text-sm text-muted-foreground">No jobs awaiting closure review</p>
             ) : (
               <div className="space-y-3">

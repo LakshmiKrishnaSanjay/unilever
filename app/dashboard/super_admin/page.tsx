@@ -3,7 +3,7 @@
 import { DashboardLayout } from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useWorkflow } from '@/lib/use-workflow';
-import { Users, FileText, Shield, Activity, Building, TrendingUp } from 'lucide-react';
+import { Users, FileText, Shield, Activity, Building, TrendingUp, CheckCircle, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
@@ -108,6 +108,19 @@ export default function SuperAdminDashboard() {
               <p className="text-xs text-muted-foreground">Registered stakeholders</p>
             </CardContent>
           </Card>
+
+          <Card>
+  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+    <CardTitle className="text-sm font-medium">Closed Jobs</CardTitle>
+    <CheckCircle className="h-4 w-4 text-success" />
+  </CardHeader>
+  <CardContent>
+    <div className="text-2xl font-bold">
+      {ptws.filter((p) => p.status === 'CLOSED').length}
+    </div>
+    <p className="text-xs text-muted-foreground">Successfully closed PTWs</p>
+  </CardContent>
+</Card>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -162,7 +175,84 @@ export default function SuperAdminDashboard() {
               </div>
             </CardContent>
           </Card>
+
+
+
         </div>
+
+                          <Card>
+          <CardHeader>
+            <CardTitle>System Management</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-4">
+              <Button variant="outline" asChild>
+                <Link href="/moc">
+                  <FileText className="mr-2 h-4 w-4" />
+                  Manage MOCs
+                </Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href="/permits">
+                  <Shield className="mr-2 h-4 w-4" />
+                  View All PTWs
+                </Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href="/reports">
+                  <BarChart3 className="mr-2 h-4 w-4" />
+                  Reports
+                </Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href="/activity">
+                  <Activity className="mr-2 h-4 w-4" />
+                  Activity Log
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>System Statistics</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-muted-foreground" />
+                  <p className="text-sm font-medium text-muted-foreground">MOC Approval Rate</p>
+                </div>
+                <p className="mt-2 text-2xl font-semibold">
+                  {mocs.length > 0
+                    ? `${((mocs.filter((m) => m.status === 'APPROVED').length / mocs.length) * 100).toFixed(0)}%`
+                    : '0%'}
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-muted-foreground" />
+                  <p className="text-sm font-medium text-muted-foreground">PTW Completion Rate</p>
+                </div>
+                <p className="mt-2 text-2xl font-semibold">
+                  {ptws.length > 0
+                    ? `${((ptws.filter((p) => p.status === 'CLOSED').length / ptws.length) * 100).toFixed(0)}%`
+                    : '0%'}
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center gap-2">
+                  <Users className="h-5 w-5 text-muted-foreground" />
+                  <p className="text-sm font-medium text-muted-foreground">Active Users</p>
+                </div>
+                <p className="mt-2 text-2xl font-semibold">{users.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
       </div>
     </DashboardLayout>
   );

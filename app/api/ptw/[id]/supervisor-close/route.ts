@@ -1,6 +1,68 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
+type ChecklistItems = {
+  work_completed?: boolean;
+  area_cleaned?: boolean;
+  tools_removed?: boolean;
+  safety_verified?: boolean;
+  documentation_complete?: boolean;
+};
+
+type PTWRoutingInput = {
+  requires_facilities_review: boolean | null;
+  requires_efs_review: boolean | null;
+  sent_back_from_stage?: string | null;
+};
+
+function getNextClosureStatus(ptw: PTWRoutingInput) {
+  const requiresFacilities = ptw.requires_facilities_review === true;
+  const requiresEfs = ptw.requires_efs_review === true;
+  const sentBackFromStage = ptw.sent_back_from_stage || null;
+
+  // Re-submit to the exact stage that rejected it
+  if (sentBackFromStage === 'PENDING_FACILITIES_CLOSURE') {
+    return {
+      nextStatus: 'PENDING_FACILITIES_CLOSURE',
+      nextStageLabel: 'Facilities Closure',
+    };
+  }
+
+  if (sentBackFromStage === 'PENDING_EFS_CLOSURE') {
+    return {
+      nextStatus: 'PENDING_EFS_CLOSURE',
+      nextStageLabel: 'EFS Closure',
+    };
+  }
+
+  if (sentBackFromStage === 'PENDING_HSE_CLOSURE') {
+    return {
+      nextStatus: 'PENDING_HSE_CLOSURE',
+      nextStageLabel: 'HSE Closure',
+    };
+  }
+
+  // Fresh routing
+  if (requiresFacilities) {
+    return {
+      nextStatus: 'PENDING_FACILITIES_CLOSURE',
+      nextStageLabel: 'Facilities Closure',
+    };
+  }
+
+  if (requiresEfs) {
+    return {
+      nextStatus: 'PENDING_EFS_CLOSURE',
+      nextStageLabel: 'EFS Closure',
+    };
+  }
+
+  return {
+    nextStatus: 'PENDING_HSE_CLOSURE',
+    nextStageLabel: 'HSE Closure',
+  };
+}
+
 export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> }
@@ -9,11 +71,9 @@ export async function PATCH(
     const { id } = await context.params;
     const body = await req.json();
 
-    const {
-      checklistItems,
-      finalNotes,
-      completedBy,
-    } = body || {};
+    const checklistItems: ChecklistItems = body?.checklistItems || {};
+    const finalNotes = body?.finalNotes || '';
+    const completedBy = body?.completedBy || 'Supervisor';
 
     if (!id) {
       return NextResponse.json(
@@ -22,9 +82,7 @@ export async function PATCH(
       );
     }
 
-    const allChecked =
-      checklistItems &&
-      Object.values(checklistItems).every(Boolean);
+    const allChecked = Object.values(checklistItems).every(Boolean);
 
     if (!allChecked) {
       return NextResponse.json(
@@ -33,7 +91,7 @@ export async function PATCH(
       );
     }
 
-    if (!finalNotes?.trim()) {
+    if (!finalNotes.trim()) {
       return NextResponse.json(
         { success: false, error: 'Final closure notes are required' },
         { status: 400 }
@@ -69,34 +127,42 @@ export async function PATCH(
       return NextResponse.json(
         {
           success: false,
-          error: 'Only PTWs in WORK_COMPLETED status can be submitted for closure',
+          error: 'Only PTWs in WORK_COMPLETED status can be submitted for supervisor closure',
         },
         { status: 400 }
       );
     }
+
+    const { nextStatus, nextStageLabel } = getNextClosureStatus(ptw);
 
     const timeline = Array.isArray(ptw.timeline) ? [...ptw.timeline] : [];
 
     timeline.push({
       id: `ptl-${Date.now()}`,
       timestamp: new Date().toISOString(),
-      user: completedBy || 'Contractor Supervisor',
-      role: 'contractor_supervisor',
+      user: completedBy,
+      role: 'supervisor',
       action: 'Supervisor Closure Submitted',
-      status: 'PENDING_FACILITIES_CLOSURE',
-      remarks: finalNotes,
+      status: nextStatus,
+      remarks: finalNotes.trim(),
     });
+
+    const updatePayload = {
+      status: nextStatus,
+      supervisor_closure_checklist: checklistItems,
+      supervisor_closure_notes: finalNotes.trim(),
+      supervisor_closure_completed_at: new Date().toISOString(),
+      supervisor_closure_completed_by: completedBy,
+      sent_back_to_role: null,
+      sent_back_reason: null,
+      sent_back_from_stage: null,
+      timeline,
+      updated_at: new Date().toISOString(),
+    };
 
     const { error: updateError } = await supabase
       .from('ptws')
-      .update({
-        status: 'PENDING_FACILITIES_CLOSURE',
-        supervisor_closure_checklist: checklistItems,
-        supervisor_closure_notes: finalNotes.trim(),
-        supervisor_closure_completed_at: new Date().toISOString(),
-        supervisor_closure_completed_by: completedBy || 'Contractor Supervisor',
-        timeline,
-      })
+      .update(updatePayload)
       .eq('id', id);
 
     if (updateError) {
@@ -106,7 +172,12 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      nextStatus,
+      nextStageLabel,
+      message: `Supervisor closure submitted. Routed to ${nextStageLabel}.`,
+    });
   } catch (error: any) {
     return NextResponse.json(
       { success: false, error: error?.message || 'Unexpected error' },

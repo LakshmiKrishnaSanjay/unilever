@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -30,92 +30,123 @@ import { CheckCircle, Clock, FileText, AlertCircle, Plus, Camera, X } from 'luci
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { formatDate } from '@/lib/format';
-import type { PTW } from '@/lib/types';
-
-
+import type { PTW, MOC } from '@/lib/types';
+import { supabase } from '@/lib/supabase-client';
 
 export default function SupervisorDashboard() {
-  const { ptws = [], mocs = [], currentUser } = useWorkflow();
+  const { ptws = [] } = useWorkflow();
   const workflowActions = useWorkflowActions();
+
   const [selectedPTW, setSelectedPTW] = useState<PTW | null>(null);
   const [currentStatus, setCurrentStatus] = useState('');
   const [remarks, setRemarks] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
+  const [dbPtws, setDbPtws] = useState<PTW[]>([]);
+  const [dbMocs, setDbMocs] = useState<MOC[]>([]);
+  const [loadingStats, setLoadingStats] = useState(true);
+
+  // Keep Active Work from workflow store because that part already works fine
   const activeWork = (ptws ?? []).filter((p) => p.status === 'ACTIVE');
-  const completedWork = (ptws ?? []).filter((p) => p.status === 'WORK_COMPLETED');
-  const totalPTWs = (ptws ?? []).length;
-  const activeMOCs = (mocs ?? []).filter(
-    (m) => m.status === 'APPROVED' && new Date(m.expiry_date) > new Date()
-  );
 
-const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+  // Fetch other dashboard data from Supabase
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoadingStats(true);
 
-  setSelectedFile(file);
-  setImagePreview(URL.createObjectURL(file));
-};
+        const [ptwRes, mocRes] = await Promise.all([
+          supabase.from('ptws').select('*').order('created_at', { ascending: false }),
+          supabase.from('mocs').select('*').order('created_at', { ascending: false }),
+        ]);
+
+        if (ptwRes.error) throw ptwRes.error;
+        if (mocRes.error) throw mocRes.error;
+
+        setDbPtws((ptwRes.data || []) as PTW[]);
+        setDbMocs((mocRes.data || []) as MOC[]);
+      } catch (error) {
+        console.error('Failed to fetch supervisor dashboard data:', error);
+        toast.error('Failed to load latest dashboard data');
+      } finally {
+        setLoadingStats(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
+  // These now come from Supabase
+  const completedWork = (dbPtws ?? []).filter((p) => p.status === 'WORK_COMPLETED');
+  const totalPTWs = (dbPtws ?? []).length;
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setSelectedFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
 
   const handleRemovePhoto = () => {
     setSelectedFile(null);
     setImagePreview(null);
   };
 
-const handleAddWorkLog = async () => {
-  if (!selectedPTW) return;
+  const handleAddWorkLog = async () => {
+    if (!selectedPTW) return;
 
-  if (!currentStatus.trim()) {
-    toast.error('Current status is required');
-    return;
-  }
-
-  if (!remarks.trim()) {
-    toast.error('Remarks are required');
-    return;
-  }
-
-  if (!selectedFile) {
-    toast.error('Photo evidence is required');
-    return;
-  }
-
-  try {
-    const uploadResult = await workflowActions.uploadPTWWorkLogPhoto(
-      selectedFile,
-      selectedPTW.id
-    );
-
-    if (!uploadResult.success || !uploadResult.url) {
-      toast.error(uploadResult.error || 'Photo upload failed');
+    if (!currentStatus.trim()) {
+      toast.error('Current status is required');
       return;
     }
 
-    const saveResult = await workflowActions.addPTWWorkLog(
-      selectedPTW.id,
-      currentStatus.trim(),
-      remarks.trim(),
-      uploadResult.url
-    );
-
-    if (!saveResult.success) {
-      toast.error(saveResult.error || 'Failed to save work log');
+    if (!remarks.trim()) {
+      toast.error('Remarks are required');
       return;
     }
 
-    toast.success('Work log added successfully');
+    if (!selectedFile) {
+      toast.error('Photo evidence is required');
+      return;
+    }
 
-    setSelectedPTW(null);
-    setCurrentStatus('');
-    setRemarks('');
-    setSelectedFile(null);
-    setImagePreview(null);
-  } catch (error) {
-    console.error(error);
-    toast.error('Failed to add work log');
-  }
-};
+    try {
+      const uploadResult = await workflowActions.uploadPTWWorkLogPhoto(
+        selectedFile,
+        selectedPTW.id
+      );
+
+      if (!uploadResult.success || !uploadResult.url) {
+        toast.error(uploadResult.error || 'Photo upload failed');
+        return;
+      }
+
+      const saveResult = await workflowActions.addPTWWorkLog(
+        selectedPTW.id,
+        currentStatus.trim(),
+        remarks.trim(),
+        uploadResult.url
+      );
+
+      if (!saveResult.success) {
+        toast.error(saveResult.error || 'Failed to save work log');
+        return;
+      }
+
+      toast.success('Work log added successfully');
+
+      setSelectedPTW(null);
+      setCurrentStatus('');
+      setRemarks('');
+      setSelectedFile(null);
+      setImagePreview(null);
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to add work log');
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -136,22 +167,22 @@ const handleAddWorkLog = async () => {
           />
           <StatCard
             title="Pending Closure"
-            value={completedWork.length}
+            value={loadingStats ? '...' : completedWork.length}
             description="Awaiting supervisor review"
             icon={FileText}
           />
           <StatCard
             title="Total PTWs"
-            value={totalPTWs}
+            value={loadingStats ? '...' : totalPTWs}
             description="All time permits"
             icon={CheckCircle}
           />
-          <StatCard
-            title="Active MOCs"
-            value={activeMOCs.length}
-            description="Currently approved"
-            icon={AlertCircle}
-          />
+<StatCard
+  title="Closed Jobs"
+  value={loadingStats ? '...' : dbPtws.filter((p) => p.status === 'CLOSED').length}
+  description="Fully closed permits"
+  icon={AlertCircle}
+/>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -204,11 +235,13 @@ const handleAddWorkLog = async () => {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Pending Closure</CardTitle>
-                <Badge variant="secondary">{completedWork.length}</Badge>
+                <Badge variant="secondary">{loadingStats ? '...' : completedWork.length}</Badge>
               </div>
             </CardHeader>
             <CardContent>
-              {completedWork.length === 0 ? (
+              {loadingStats ? (
+                <p className="text-center text-sm text-muted-foreground">Loading...</p>
+              ) : completedWork.length === 0 ? (
                 <p className="text-center text-sm text-muted-foreground">
                   No jobs pending closure
                 </p>
@@ -226,15 +259,13 @@ const handleAddWorkLog = async () => {
                       <TableRow key={ptw.id}>
                         <TableCell className="font-medium">{ptw.id}</TableCell>
                         <TableCell>{ptw.title}</TableCell>
-                        <TableCell>
-                          {formatDate(ptw.work_completed_date)}
-                        </TableCell>
+                        <TableCell>{formatDate(ptw.work_completed_date)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               )}
-              {completedWork.length > 0 && (
+              {!loadingStats && completedWork.length > 0 && (
                 <Button asChild className="mt-4 w-full">
                   <Link href="/supervisor/close-job">Review & Close Jobs</Link>
                 </Button>
@@ -272,13 +303,16 @@ const handleAddWorkLog = async () => {
         </Card>
       </div>
 
-      <Dialog open={!!selectedPTW} onOpenChange={() => {
-        setSelectedPTW(null);
-        setCurrentStatus('');
-        setRemarks('');
-        setSelectedFile(null);
-        setImagePreview(null);
-      }}>
+      <Dialog
+        open={!!selectedPTW}
+        onOpenChange={() => {
+          setSelectedPTW(null);
+          setCurrentStatus('');
+          setRemarks('');
+          setSelectedFile(null);
+          setImagePreview(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Hourly Work Log</DialogTitle>
@@ -327,7 +361,7 @@ const handleAddWorkLog = async () => {
                   onChange={handleFileSelect}
                   className="hidden"
                 />
-                
+
                 {!imagePreview ? (
                   <label
                     htmlFor="file-upload"
@@ -374,8 +408,8 @@ const handleAddWorkLog = async () => {
             </div>
           )}
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setSelectedPTW(null);
                 setCurrentStatus('');
@@ -386,7 +420,7 @@ const handleAddWorkLog = async () => {
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={handleAddWorkLog}
               disabled={!currentStatus.trim() || !remarks.trim() || !selectedFile}
             >

@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useWorkflow, useWorkflowActions } from '@/lib/use-workflow';
+import { useWorkflow } from '@/lib/use-workflow';
 import {
   Table,
   TableBody,
@@ -28,48 +29,95 @@ import { CheckCircle, FileText, ArrowLeft, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { PTW } from '@/lib/types';
 
+type ExtendedPTW = PTW & {
+  supervisor_closure_completed_by?: string | null;
+  supervisor_closure_notes?: string | null;
+  supervisor_closure_checklist?: Record<string, boolean> | null;
+};
+
+function formatDateTime(date?: string | Date | null) {
+  if (!date) return '-';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return '-';
+
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getNextStageAfterFacilities(ptw: ExtendedPTW) {
+  return ptw.requires_efs_review ? 'EFS Closure' : 'HSE Closure';
+}
+
 export default function FacilitiesClosurePage() {
-  const { ptws } = useWorkflow();
-  const workflowActions = useWorkflowActions();
-  const [selectedPTW, setSelectedPTW] = useState<PTW | null>(null);
+  const router = useRouter();
+  const { ptws, currentUser } = useWorkflow();
+
+  const [selectedPTW, setSelectedPTW] = useState<ExtendedPTW | null>(null);
   const [notes, setNotes] = useState('');
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  // PTWs waiting for facilities closure review
-  const pendingClosurePTWs = ptws.filter(
-    (p) => p.status === 'PENDING_FACILITIES_CLOSURE'
-  );
+  const pendingClosurePTWs = useMemo(() => {
+    return (ptws as ExtendedPTW[]).filter(
+      (p) => p.status === 'PENDING_FACILITIES_CLOSURE'
+    );
+  }, [ptws]);
 
-  const formatDateTime = (date: Date | string) => {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    return d.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  const resetAll = () => {
+    setSelectedPTW(null);
+    setNotes('');
+    setRejectReason('');
+    setShowRejectDialog(false);
+    setSubmitting(false);
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!selectedPTW) return;
 
     if (!notes.trim()) {
-      toast.error('Please provide closure review notes');
+      toast.error('Please provide facilities closure review notes');
       return;
     }
 
-    const result = workflowActions.approveFacilitiesClosure(selectedPTW.id, notes);
-    if (result.success) {
-      toast.success('Closure approved - Sent to HSE for final approval');
-      setSelectedPTW(null);
-      setNotes('');
-    } else {
-      toast.error(result.error || 'Failed to approve closure');
+    try {
+      setSubmitting(true);
+
+      const res = await fetch(`/api/ptw/${selectedPTW.id}/facilities-close`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          notes: notes.trim(),
+          completedBy: currentUser?.name || 'Facilities Manager',
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json?.success) {
+        toast.error(json?.error || 'Failed to approve facilities closure');
+        setSubmitting(false);
+        return;
+      }
+
+      toast.success(
+        `Facilities closure approved - Sent to ${json?.nextStageLabel || 'next stage'}`
+      );
+
+      window.location.reload();
+    } catch (error: any) {
+      toast.error(error?.message || 'Unexpected error');
+      setSubmitting(false);
     }
   };
 
-  const handleReject = () => {
+  const handleReject = async () => {
     if (!selectedPTW) return;
 
     if (!rejectReason.trim()) {
@@ -77,15 +125,34 @@ export default function FacilitiesClosurePage() {
       return;
     }
 
-    const result = workflowActions.rejectFacilitiesClosure(selectedPTW.id, rejectReason);
-    if (result.success) {
-      toast.success('Closure rejected - Returned to supervisor');
-      setSelectedPTW(null);
-      setShowRejectDialog(false);
-      setRejectReason('');
-      setNotes('');
-    } else {
-      toast.error(result.error || 'Failed to reject closure');
+    try {
+      setSubmitting(true);
+
+      const res = await fetch(`/api/ptw/${selectedPTW.id}/facilities-close/reject`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          reason: rejectReason.trim(),
+          rejectedBy: currentUser?.name || 'Facilities Manager',
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json?.success) {
+        toast.error(json?.error || 'Failed to reject facilities closure');
+        setSubmitting(false);
+        return;
+      }
+
+      toast.success('Facilities closure rejected - Returned to supervisor');
+
+      window.location.reload();
+    } catch (error: any) {
+      toast.error(error?.message || 'Unexpected error');
+      setSubmitting(false);
     }
   };
 
@@ -96,9 +163,12 @@ export default function FacilitiesClosurePage() {
           <Button variant="outline" size="icon" onClick={() => router.back()}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
+
           <div>
-            <h1 className="text-3xl font-semibold">Job Closure Reviews</h1>
-            <p className="text-muted-foreground">Review completed work and approve job closures</p>
+            <h1 className="text-3xl font-semibold">Facilities Closure Reviews</h1>
+            <p className="text-muted-foreground">
+              Review completed work and move PTWs to EFS or HSE closure
+            </p>
           </div>
         </div>
 
@@ -107,17 +177,18 @@ export default function FacilitiesClosurePage() {
             <div className="flex items-center gap-2">
               <CheckCircle className="h-5 w-5" />
               <CardTitle>
-                Pending Closure Review ({pendingClosurePTWs.length})
+                Pending Facilities Closure ({pendingClosurePTWs.length})
               </CardTitle>
             </div>
           </CardHeader>
+
           <CardContent>
             {pendingClosurePTWs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <FileText className="mb-4 h-12 w-12 text-muted-foreground" />
-                <p className="text-lg font-medium">No jobs pending closure review</p>
+                <p className="text-lg font-medium">No jobs pending facilities closure</p>
                 <p className="text-sm text-muted-foreground">
-                  Completed jobs will appear here for review
+                  PTWs awaiting facilities closure review will appear here
                 </p>
               </div>
             ) : (
@@ -128,10 +199,11 @@ export default function FacilitiesClosurePage() {
                     <TableHead>Title</TableHead>
                     <TableHead>Location</TableHead>
                     <TableHead>Completed Date</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Next Stage After Approval</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
+
                 <TableBody>
                   {pendingClosurePTWs.map((ptw) => (
                     <TableRow key={ptw.id}>
@@ -141,14 +213,16 @@ export default function FacilitiesClosurePage() {
                       <TableCell>
                         {ptw.work_completed_date
                           ? formatDateTime(ptw.work_completed_date)
-                          : 'N/A'}
+                          : '-'}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">Pending Facilities Closure</Badge>
+                        <Badge variant="outline">
+                          {getNextStageAfterFacilities(ptw)}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Button size="sm" onClick={() => setSelectedPTW(ptw)}>
-                          Review & Approve
+                          Review
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -160,92 +234,149 @@ export default function FacilitiesClosurePage() {
         </Card>
       </div>
 
-      <Dialog open={!!selectedPTW && !showRejectDialog} onOpenChange={() => setSelectedPTW(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Facilities Closure Review</DialogTitle>
-            <DialogDescription>
-              Review supervisor closure checklist and approve for HSE final review
-            </DialogDescription>
-          </DialogHeader>
-          {selectedPTW && (
-            <div className="space-y-6">
-              <div className="rounded-lg border p-4">
-                <h4 className="mb-2 font-medium">{selectedPTW.title}</h4>
-                <p className="text-sm text-muted-foreground">ID: {selectedPTW.id}</p>
-                <p className="text-sm text-muted-foreground">Location: {selectedPTW.location}</p>
-                <p className="text-sm text-muted-foreground">
-                  Completed: {selectedPTW.work_completed_date ? formatDateTime(selectedPTW.work_completed_date) : '-'}
+<Dialog
+  open={!!selectedPTW && !showRejectDialog}
+  onOpenChange={(open) => {
+    if (!open && !submitting) resetAll();
+  }}
+>
+  <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden p-0">
+    <div className="flex max-h-[90vh] flex-col">
+      <DialogHeader className="border-b px-6 pt-6 pb-4">
+        <DialogTitle>Facilities Closure Review</DialogTitle>
+        <DialogDescription>
+          Review supervisor closure details and move this PTW to the next closure stage
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        {selectedPTW && (
+          <div className="space-y-6">
+            <div className="rounded-lg border p-4">
+              <h4 className="mb-2 font-medium">{selectedPTW.title}</h4>
+              <p className="text-sm text-muted-foreground">ID: {selectedPTW.id}</p>
+              <p className="text-sm text-muted-foreground">Location: {selectedPTW.location}</p>
+              <p className="text-sm text-muted-foreground">
+                Completed: {formatDateTime(selectedPTW.work_completed_date)}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Next Stage After Approval: {getNextStageAfterFacilities(selectedPTW)}
+              </p>
+
+              {selectedPTW.supervisor_closure_completed_by && (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Supervisor: {selectedPTW.supervisor_closure_completed_by}
                 </p>
-                {selectedPTW.supervisorClosureCompletedBy && (
+              )}
+
+              {selectedPTW.supervisor_closure_notes && (
+                <div className="mt-3 rounded bg-muted p-3">
+                  <p className="text-sm font-medium">Supervisor Notes</p>
                   <p className="text-sm text-muted-foreground">
-                    Supervisor: {selectedPTW.supervisorClosureCompletedBy}
+                    {selectedPTW.supervisor_closure_notes}
                   </p>
-                )}
-                {selectedPTW.supervisorClosureNotes && (
-                  <div className="mt-2 rounded bg-muted p-2">
-                    <p className="text-sm font-medium">Supervisor Notes:</p>
-                    <p className="text-sm text-muted-foreground">{selectedPTW.supervisorClosureNotes}</p>
+                </div>
+              )}
+
+              {selectedPTW.supervisor_closure_checklist &&
+                Object.keys(selectedPTW.supervisor_closure_checklist).length > 0 && (
+                  <div className="mt-3 rounded bg-muted p-3">
+                    <p className="mb-2 text-sm font-medium">Supervisor Checklist</p>
+                    <div className="space-y-1 text-sm text-muted-foreground">
+                      {Object.entries(selectedPTW.supervisor_closure_checklist).map(
+                        ([key, value]) => (
+                          <div key={key}>
+                            {key.replace(/_/g, ' ')}: {value ? 'Yes' : 'No'}
+                          </div>
+                        )
+                      )}
+                    </div>
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-2">
-                <Label>Facilities Review Notes *</Label>
-                <Textarea
-                  placeholder="Provide facilities closure review notes, observations, and approval remarks..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={5}
-                />
-              </div>
             </div>
-          )}
-          <DialogFooter className="gap-2">
-            <Button 
-              variant="destructive" 
-              onClick={() => {
-                setShowRejectDialog(true);
-              }}
-            >
-              <X className="mr-1 h-4 w-4" />
-              Reject
-            </Button>
-            <Button variant="outline" onClick={() => setSelectedPTW(null)}>
-              Cancel
-            </Button>
-            <Button onClick={handleApprove}>Approve & Send to HSE</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reject Closure</DialogTitle>
-            <DialogDescription>
-              Provide reason for rejecting the closure - will return to supervisor
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label>Rejection Reason *</Label>
-            <Textarea
-              placeholder="Explain why the closure is being rejected and what needs to be addressed..."
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              rows={4}
-            />
+            <div className="space-y-2 pb-2">
+              <Label>Facilities Review Notes *</Label>
+              <Textarea
+                placeholder="Provide facilities closure review notes, observations, and approval remarks..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={5}
+              />
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRejectDialog(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleReject}>
-              Reject Closure
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        )}
+      </div>
+
+      <DialogFooter className="border-t px-6 py-4">
+        <Button
+          variant="destructive"
+          onClick={() => setShowRejectDialog(true)}
+          disabled={submitting}
+        >
+          <X className="mr-1 h-4 w-4" />
+          Reject
+        </Button>
+
+        <Button variant="outline" onClick={resetAll} disabled={submitting}>
+          Cancel
+        </Button>
+
+        <Button onClick={handleApprove} disabled={submitting}>
+          {submitting
+            ? 'Submitting...'
+            : `Approve & Send to ${
+                selectedPTW ? getNextStageAfterFacilities(selectedPTW) : 'Next Stage'
+              }`}
+        </Button>
+      </DialogFooter>
+    </div>
+  </DialogContent>
+</Dialog>
+
+<Dialog
+  open={showRejectDialog}
+  onOpenChange={(open) => {
+    if (!open && !submitting) setShowRejectDialog(false);
+  }}
+>
+  <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden p-0">
+    <div className="flex max-h-[85vh] flex-col">
+      <DialogHeader className="border-b px-6 pt-6 pb-4">
+        <DialogTitle>Reject Facilities Closure</DialogTitle>
+        <DialogDescription>
+          Provide a reason for rejecting this closure. It will return to supervisor.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="space-y-2 pb-2">
+          <Label>Rejection Reason *</Label>
+          <Textarea
+            placeholder="Explain why the closure is being rejected and what needs to be corrected..."
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            rows={4}
+          />
+        </div>
+      </div>
+
+      <DialogFooter className="border-t px-6 py-4">
+        <Button
+          variant="outline"
+          onClick={() => setShowRejectDialog(false)}
+          disabled={submitting}
+        >
+          Cancel
+        </Button>
+
+        <Button variant="destructive" onClick={handleReject} disabled={submitting}>
+          {submitting ? 'Rejecting...' : 'Reject Closure'}
+        </Button>
+      </DialogFooter>
+    </div>
+  </DialogContent>
+</Dialog>
     </DashboardLayout>
   );
 }

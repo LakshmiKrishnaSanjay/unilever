@@ -3,9 +3,8 @@
 import { DashboardLayout } from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { useWorkflow } from '@/lib/use-workflow';
 import type { MOCRecord } from '@/src/types/moc';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   FileText,
   ClipboardCheck,
@@ -17,47 +16,74 @@ import {
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase-client';
+import type { PTW } from '@/lib/types';
 
 export default function HSEDashboardPage() {
-  const { ptws = [] } = useWorkflow();
   const [mocs, setMocs] = useState<MOCRecord[]>([]);
-
-  // Load MOCs from storage
+  const [ptws, setPtws] = useState<PTW[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-  loadDashboardData();
-}, []);
+    loadDashboardData();
+  }, []);
 
-const loadDashboardData = async () => {
-  try {
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
 
-    const { data, error } = await supabase
-      .from("mocs")
-      .select("*");
+      const [mocsRes, ptwsRes] = await Promise.all([
+        supabase.from('mocs').select('*').order('created_at', { ascending: false }),
+        supabase.from('ptws').select('*').order('created_at', { ascending: false }),
+      ]);
 
-    if (error) throw error;
+      if (mocsRes.error) throw mocsRes.error;
+      if (ptwsRes.error) throw ptwsRes.error;
 
-    setMocs(data || []);
-
-  } catch (error) {
-    console.error("Dashboard load error:", error);
-  }
-};
-
-
-  const stats = {
-    pendingMOCs: mocs.filter((m) => m.status === 'SUBMITTED' || m.status === 'STAKEHOLDER_SIGNED' || m.status === 'CONTRACTOR_SUBMITTED').length,
-    approvedMOCs: mocs.filter((m) => m.status === 'APPROVED').length,
-    ptwsInReview: (ptws ?? []).filter((p) => p.status === 'PENDING_HSE_APPROVAL').length,
-    activePTWs: (ptws ?? []).filter((p) => p.status === 'ACTIVE').length,
-    pendingClosure: (ptws ?? []).filter((p) => p.status === 'WORK_FINISHED').length,
-    totalThisMonth: (ptws ?? []).length,
+      setMocs((mocsRes.data || []) as MOCRecord[]);
+      setPtws((ptwsRes.data || []) as PTW[]);
+    } catch (error) {
+      console.error('Dashboard load error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const pendingMOCs = mocs.filter((m) => m.status === 'SUBMITTED' || m.status === 'STAKEHOLDER_SIGNED' || m.status === 'CONTRACTOR_SUBMITTED');
-  const mocsAwaitingContractor = mocs.filter((m) => (m.status === 'SUBMITTED' || m.status === 'STAKEHOLDER_SIGNED') && !m.contractorGate?.acknowledged);
-  const ptwsForReview = (ptws ?? []).filter((p) => p.status === 'PENDING_HSE_APPROVAL');
-  const ptwsForClosure = (ptws ?? []).filter((p) => p.status === 'WORK_FINISHED');
+  const stats = useMemo(() => {
+    return {
+      pendingMOCs: mocs.filter(
+        (m) =>
+          m.status === 'SUBMITTED' ||
+          m.status === 'STAKEHOLDER_SIGNED' ||
+          m.status === 'CONTRACTOR_SUBMITTED'
+      ).length,
+      approvedMOCs: mocs.filter((m) => m.status === 'APPROVED').length,
+      ptwsInReview: ptws.filter((p) => p.status === 'PENDING_HSE_APPROVAL').length,
+      activePTWs: ptws.filter((p) => p.status === 'ACTIVE').length,
+      pendingClosure: ptws.filter((p) => p.status === 'PENDING_HSE_CLOSURE').length,
+      totalThisMonth: ptws.length,
+    };
+  }, [mocs, ptws]);
+
+  const pendingMOCs = useMemo(
+    () =>
+      mocs.filter(
+        (m) =>
+          m.status === 'SUBMITTED' ||
+          m.status === 'STAKEHOLDER_SIGNED' ||
+          m.status === 'CONTRACTOR_SUBMITTED'
+      ),
+    [mocs]
+  );
+
+  const ptwsForReview = useMemo(
+    () => ptws.filter((p) => p.status === 'PENDING_HSE_APPROVAL'),
+    [ptws]
+  );
+
+  const ptwsForClosure = useMemo(
+    () => ptws.filter((p) => p.status === 'PENDING_HSE_CLOSURE'),
+    [ptws]
+  );
 
   return (
     <DashboardLayout>
@@ -67,7 +93,6 @@ const loadDashboardData = async () => {
           <p className="text-muted-foreground">Monitor and approve MOCs and PTWs</p>
         </div>
 
-        {/* Stats Cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -98,7 +123,7 @@ const loadDashboardData = async () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.pendingClosure}</div>
-              <p className="text-xs text-muted-foreground">Jobs awaiting closure</p>
+              <p className="text-xs text-muted-foreground">Jobs awaiting final HSE closure</p>
             </CardContent>
           </Card>
 
@@ -136,9 +161,7 @@ const loadDashboardData = async () => {
           </Card>
         </div>
 
-        {/* Action Items */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Pending MOC Approvals */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -147,42 +170,51 @@ const loadDashboardData = async () => {
               </div>
             </CardHeader>
             <CardContent>
-              {pendingMOCs.length === 0 ? (
+              {loading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : pendingMOCs.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No pending MOCs</p>
               ) : (
                 <div className="space-y-3">
-                  {pendingMOCs.slice(0, 3).map((moc) => {
-                    const awaitingContractor = (moc.status === 'SUBMITTED' || moc.status === 'STAKEHOLDER_SIGNED') && !moc.contractorGate?.acknowledged;
+                  {pendingMOCs.slice(0, 3).map((moc: any) => {
+                    const awaitingContractor =
+                      (moc.status === 'SUBMITTED' || moc.status === 'STAKEHOLDER_SIGNED') &&
+                      !moc.contractorGate?.acknowledged;
+
                     return (
                       <Link key={moc.id} href={`/moc/${moc.id}`}>
                         <div className="flex items-start justify-between rounded-lg border p-3 transition-colors hover:bg-muted">
                           <div className="flex-1">
                             <p className="font-medium">{moc.title}</p>
                             <p className="text-sm text-muted-foreground">{moc.id}</p>
+
                             {awaitingContractor && (
-                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                                <Clock className="inline h-3 w-3 mr-1" />
+                              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                                <Clock className="mr-1 inline h-3 w-3" />
                                 Awaiting contractor acknowledgement
                               </p>
                             )}
+
                             {moc.status === 'CONTRACTOR_SUBMITTED' && (
-                              <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                                <Clock className="inline h-3 w-3 mr-1" />
+                              <p className="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                                <Clock className="mr-1 inline h-3 w-3" />
                                 Ready for Facilities review
                               </p>
                             )}
                           </div>
+
                           <Badge
                             variant={
                               moc.status === 'CONTRACTOR_SUBMITTED' ? 'default' : 'secondary'
                             }
                           >
-                            {moc.status.replace(/_/g, ' ')}
+                            {String(moc.status).replace(/_/g, ' ')}
                           </Badge>
                         </div>
                       </Link>
                     );
                   })}
+
                   {pendingMOCs.length > 3 && (
                     <Button variant="outline" className="w-full bg-transparent" asChild>
                       <Link href="/moc">View All MOCs</Link>
@@ -193,7 +225,6 @@ const loadDashboardData = async () => {
             </CardContent>
           </Card>
 
-          {/* PTW Final Review Queue */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -202,7 +233,9 @@ const loadDashboardData = async () => {
               </div>
             </CardHeader>
             <CardContent>
-              {ptwsForReview.length === 0 ? (
+              {loading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : ptwsForReview.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No PTWs awaiting review</p>
               ) : (
                 <div className="space-y-3">
@@ -218,6 +251,7 @@ const loadDashboardData = async () => {
                       <Badge>{ptw.permit_type}</Badge>
                     </div>
                   ))}
+
                   {ptwsForReview.length > 3 && (
                     <Button variant="outline" className="w-full bg-transparent" asChild>
                       <Link href="/hse/queue">View Review Queue</Link>
@@ -228,7 +262,6 @@ const loadDashboardData = async () => {
             </CardContent>
           </Card>
 
-          {/* Job Closure Queue */}
           <Card className="lg:col-span-2">
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -237,7 +270,9 @@ const loadDashboardData = async () => {
               </div>
             </CardHeader>
             <CardContent>
-              {ptwsForClosure.length === 0 ? (
+              {loading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : ptwsForClosure.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No jobs awaiting closure</p>
               ) : (
                 <div className="space-y-3">

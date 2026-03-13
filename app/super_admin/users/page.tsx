@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useWorkflow } from '@/lib/use-workflow';
-import { Plus, Search, Pencil, Check, X } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -55,7 +55,7 @@ type FormState = {
   email: string;
   role: Role;
   is_active: boolean;
-  password: string; // only used when creating a new user
+  password: string;
 };
 
 export default function UsersManagementPage() {
@@ -64,6 +64,9 @@ export default function UsersManagementPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
 
   const [formData, setFormData] = useState<FormState>({
     username: '',
@@ -75,8 +78,8 @@ export default function UsersManagementPage() {
   });
 
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  // Check authorization (UI-only guard)
   if (currentUser?.role !== 'super_admin') {
     return (
       <DashboardLayout>
@@ -113,7 +116,7 @@ export default function UsersManagementPage() {
         email: user.email,
         role: user.role,
         is_active: user.is_active,
-        password: '', // keep empty while editing
+        password: '',
       });
     } else {
       setEditingUser(null);
@@ -123,21 +126,24 @@ export default function UsersManagementPage() {
         email: '',
         role: 'viewer',
         is_active: true,
-        password: '', // reset
+        password: '',
       });
     }
 
     setDialogOpen(true);
   };
 
+  const handleOpenDeleteDialog = (user: User) => {
+    setUserToDelete(user);
+    setDeleteDialogOpen(true);
+  };
+
   const handleSave = async () => {
-    // Required fields
     if (!formData.name || !formData.email || !formData.username) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    // Password required only for new users
     if (!editingUser && !formData.password) {
       toast.error('Please enter a password for the new user');
       return;
@@ -147,7 +153,6 @@ export default function UsersManagementPage() {
 
     try {
       if (editingUser) {
-        // Do NOT send password on update
         const { password, ...updatePayload } = formData;
 
         const result = await workflowStore.updateUser(editingUser.id, updatePayload as any);
@@ -158,7 +163,6 @@ export default function UsersManagementPage() {
           toast.error(result.error || 'Failed to update user');
         }
       } else {
-        // Create (includes password)
         const result = await workflowStore.addUser(formData as any);
         if (result.success) {
           toast.success('User created successfully');
@@ -172,14 +176,29 @@ export default function UsersManagementPage() {
     }
   };
 
-  const handleToggleActive = async (userId: string) => {
-    const result = await workflowStore.toggleUserActive(userId);
+const handleDeleteUser = async () => {
+  if (!userToDelete) return;
+
+  setDeleting(true);
+
+  try {
+    const result = await workflowStore.deleteUser(userToDelete.id);
+
     if (result.success) {
-      toast.success('User status updated');
+      toast.success('User deleted successfully');
+      setDeleteDialogOpen(false);
+      setUserToDelete(null);
     } else {
-      toast.error(result.error || 'Failed to update user status');
+      console.error('Delete failed:', result.error);
+      toast.error(result.error || 'Failed to delete user');
     }
-  };
+  } catch (error) {
+    console.error('Unexpected delete error:', error);
+    toast.error('Something went wrong while deleting');
+  } finally {
+    setDeleting(false);
+  }
+};
 
   return (
     <DashboardLayout>
@@ -262,12 +281,13 @@ export default function UsersManagementPage() {
                           <Button size="sm" variant="outline" onClick={() => handleOpenDialog(user)}>
                             <Pencil className="h-4 w-4" />
                           </Button>
+
                           <Button
                             size="sm"
-                            variant={user.is_active ? 'secondary' : 'default'}
-                            onClick={() => handleToggleActive(user.id)}
+                            variant="destructive"
+                            onClick={() => handleOpenDeleteDialog(user)}
                           >
-                            {user.is_active ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>
@@ -371,6 +391,66 @@ export default function UsersManagementPage() {
             </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete User</DialogTitle>
+            <DialogDescription>
+              Review the user details below before deleting. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          {userToDelete && (
+            <div className="space-y-4 rounded-lg border p-4">
+              <div>
+                <p className="text-sm text-muted-foreground">Name</p>
+                <p className="font-medium">{userToDelete.name}</p>
+              </div>
+
+              <div>
+                <p className="text-sm text-muted-foreground">Email</p>
+                <p className="font-medium">{userToDelete.email}</p>
+              </div>
+
+              <div>
+                <p className="text-sm text-muted-foreground">Username</p>
+                <p className="font-medium">{userToDelete.username}</p>
+              </div>
+
+              <div>
+                <p className="text-sm text-muted-foreground">Role</p>
+                <p className="font-medium">
+                  {roleOptions.find((r) => r.value === userToDelete.role)?.label || userToDelete.role}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm text-muted-foreground">Status</p>
+                <Badge variant={userToDelete.is_active ? 'default' : 'secondary'}>
+                  {userToDelete.is_active ? 'Active' : 'Inactive'}
+                </Badge>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                setUserToDelete(null);
+              }}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteUser} disabled={deleting}>
+              {deleting ? 'Deleting...' : 'Delete User'}
             </Button>
           </DialogFooter>
         </DialogContent>

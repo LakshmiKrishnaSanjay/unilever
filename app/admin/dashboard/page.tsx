@@ -37,7 +37,7 @@ export default function AdminDashboard() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
+        {/* <div>
           <h1 className="text-3xl font-semibold">System Administrator Dashboard</h1>
           <p className="text-muted-foreground">
             System-wide oversight and management
@@ -69,9 +69,9 @@ export default function AdminDashboard() {
             description="Total system events"
             icon={Activity}
           />
-        </div>
+        </div> */}
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        {/* <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -151,7 +151,7 @@ export default function AdminDashboard() {
               </Button>
             </CardContent>
           </Card>
-        </div>
+        </div> */}
 
         <Card>
           <CardHeader>

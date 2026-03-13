@@ -3961,23 +3961,70 @@ async deleteUser(
   id: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase
-      .from("users")
-      .update({
-        deleted_at: new Date(),
-        is_active: false,
-      })
-      .eq("id", id);
+    const { data: user, error: fetchError } = await supabase
+      .from('users')
+      .select('id, role, contractor_id, stakeholder_id')
+      .eq('id', id)
+      .single();
 
-    if (error) throw error;
+    if (fetchError || !user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (
+      (user.role === 'contractor_admin' || user.role === 'contractor_supervisor') &&
+      user.contractor_id
+    ) {
+      const { data: deletedContractor, error: contractorDeleteError } = await supabase
+        .from('contractors')
+        .delete()
+        .eq('id', user.contractor_id)
+        .select('id');
+
+      if (contractorDeleteError) {
+        console.error('Contractor delete error:', contractorDeleteError);
+        throw contractorDeleteError;
+      }
+
+      console.log('Deleted contractor:', deletedContractor);
+    }
+
+    if (user.role === 'stakeholder' && user.stakeholder_id) {
+      const { data: deletedStakeholder, error: stakeholderDeleteError } = await supabase
+        .from('stakeholders')
+        .delete()
+        .eq('id', user.stakeholder_id)
+        .select('id');
+
+      if (stakeholderDeleteError) {
+        console.error('Stakeholder delete error:', stakeholderDeleteError);
+        throw stakeholderDeleteError;
+      }
+
+      console.log('Deleted stakeholder:', deletedStakeholder);
+    }
+
+    const { data: deletedUser, error: userDeleteError } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', id)
+      .select('id');
+
+    if (userDeleteError) {
+      console.error('User delete error:', userDeleteError);
+      throw userDeleteError;
+    }
+
+    if (!deletedUser || deletedUser.length === 0) {
+      return { success: false, error: 'Delete blocked or no row was deleted' };
+    }
 
     await this.syncFromDatabase();
 
     return { success: true };
-
-  } catch (err) {
-    console.error("Delete user failed:", err);
-    return { success: false, error: "Database delete failed" };
+  } catch (err: any) {
+    console.error('Delete user failed:', err);
+    return { success: false, error: err?.message || 'Database delete failed' };
   }
 }
 

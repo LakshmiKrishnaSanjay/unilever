@@ -1,21 +1,59 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useWorkflow } from '@/lib/use-workflow';
 import Link from 'next/link';
 import { Shield, Clock, CheckCircle, Activity } from 'lucide-react';
+import { supabase } from '@/lib/supabase-client';
+import type { PTW, SecurityLog } from '@/lib/types';
 
 export default function SecurityDashboardPage() {
-  const { ptws, securityLogs } = useWorkflow();
+  const [ptws, setPtws] = useState<PTW[]>([]);
+  const [securityLogs, setSecurityLogs] = useState<SecurityLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const [ptwRes, securityLogRes] = await Promise.all([
+          supabase
+            .from('ptws')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('security_logs')
+            .select('*')
+            .order('check_in_time', { ascending: false }),
+        ]);
+
+        if (ptwRes.error) throw ptwRes.error;
+        if (securityLogRes.error) throw securityLogRes.error;
+
+        setPtws((ptwRes.data || []) as PTW[]);
+        setSecurityLogs((securityLogRes.data || []) as SecurityLog[]);
+      } catch (err: any) {
+        console.error('Failed to fetch security dashboard data:', err);
+        setError(err.message || 'Failed to load dashboard data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
 
   const stats = {
     pendingReviews: ptws.filter((p) => p.status === 'PENDING_SECURITY_REVIEW').length,
     activePTWs: ptws.filter((p) => p.status === 'ACTIVE').length,
     readyToStart: ptws.filter((p) => p.status === 'READY_FOR_ENTRY').length,
-    totalLogs: (securityLogs ?? []).length,
+    totalLogs: securityLogs.length,
   };
 
   const pendingPTWs = ptws.filter((p) => p.status === 'PENDING_SECURITY_REVIEW');
@@ -36,7 +74,7 @@ export default function SecurityDashboardPage() {
               <Clock className="h-4 w-4 text-warning" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.pendingReviews}</div>
+              <div className="text-2xl font-bold">{loading ? '...' : stats.pendingReviews}</div>
               <p className="text-xs text-muted-foreground">Awaiting security review</p>
             </CardContent>
           </Card>
@@ -47,7 +85,7 @@ export default function SecurityDashboardPage() {
               <Activity className="h-4 w-4 text-success" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.activePTWs}</div>
+              <div className="text-2xl font-bold">{loading ? '...' : stats.activePTWs}</div>
               <p className="text-xs text-muted-foreground">Work in progress</p>
             </CardContent>
           </Card>
@@ -58,7 +96,7 @@ export default function SecurityDashboardPage() {
               <CheckCircle className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.readyToStart}</div>
+              <div className="text-2xl font-bold">{loading ? '...' : stats.readyToStart}</div>
               <p className="text-xs text-muted-foreground">Awaiting check-in</p>
             </CardContent>
           </Card>
@@ -69,22 +107,32 @@ export default function SecurityDashboardPage() {
               <Shield className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.totalLogs}</div>
+              <div className="text-2xl font-bold">{loading ? '...' : stats.totalLogs}</div>
               <p className="text-xs text-muted-foreground">Check-in records</p>
             </CardContent>
           </Card>
         </div>
+
+        {error && (
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-sm text-red-500">{error}</p>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Pending Reviews</CardTitle>
-                <Badge variant="outline">{pendingPTWs.length}</Badge>
+                <Badge variant="outline">{loading ? '...' : pendingPTWs.length}</Badge>
               </div>
             </CardHeader>
             <CardContent>
-              {pendingPTWs.length === 0 ? (
+              {loading ? (
+                <p className="text-sm text-muted-foreground">Loading pending reviews...</p>
+              ) : pendingPTWs.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No pending reviews</p>
               ) : (
                 <div className="space-y-3">
@@ -112,11 +160,13 @@ export default function SecurityDashboardPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Active Work</CardTitle>
-                <Badge variant="outline">{activePTWs.length}</Badge>
+                <Badge variant="outline">{loading ? '...' : activePTWs.length}</Badge>
               </div>
             </CardHeader>
             <CardContent>
-              {activePTWs.length === 0 ? (
+              {loading ? (
+                <p className="text-sm text-muted-foreground">Loading active work...</p>
+              ) : activePTWs.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No active work</p>
               ) : (
                 <div className="space-y-3">
@@ -130,7 +180,7 @@ export default function SecurityDashboardPage() {
                         <p className="text-sm text-muted-foreground">{ptw.location}</p>
                       </div>
                       <Button size="sm" asChild>
-                        <Link href="/security/progress">Monitor</Link>
+                        <Link href={`/security/progress?ptwId=${ptw.id}`}>Monitor</Link>
                       </Button>
                     </div>
                   ))}

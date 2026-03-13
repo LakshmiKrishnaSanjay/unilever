@@ -33,6 +33,7 @@ export type PTWStatus =
   | 'WAITING_SUPERVISOR_FINISH'
   | 'WORK_FINISHED'
   | 'PENDING_FACILITIES_CLOSURE'
+  | 'PENDING_EFS_CLOSURE'
   | 'PENDING_STAKEHOLDER_CLOSURE'
   | 'PENDING_HSE_CLOSURE'
   | 'CLOSED'
@@ -145,6 +146,7 @@ export interface MOCGate {
 }
 
 export interface MOC {
+  expiry_date: boolean;
   id: string;
 
   title: string;
