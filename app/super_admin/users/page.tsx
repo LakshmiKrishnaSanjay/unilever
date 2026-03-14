@@ -35,6 +35,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import type { User, Role } from '@/lib/types';
 import { workflowStore } from '@/lib/workflow-store';
+import { supabase } from '@/lib/supabase-client';
 
 const roleOptions: { value: Role; label: string }[] = [
   { value: 'super_admin', label: 'Super Admin' },
@@ -182,16 +183,41 @@ const handleDeleteUser = async () => {
   setDeleting(true);
 
   try {
-    const result = await workflowStore.deleteUser(userToDelete.id);
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
 
-    if (result.success) {
-      toast.success('User deleted successfully');
-      setDeleteDialogOpen(false);
-      setUserToDelete(null);
-    } else {
-      console.error('Delete failed:', result.error);
-      toast.error(result.error || 'Failed to delete user');
+    if (sessionError) {
+      toast.error(sessionError.message || 'Failed to get session');
+      return;
     }
+
+    const token = sessionData.session?.access_token;
+
+    if (!token) {
+      toast.error('No auth session found');
+      return;
+    }
+
+    const res = await fetch('/api/admin/users/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ userId: userToDelete.id }),
+    });
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      toast.error(result.error || 'Failed to delete user');
+      return;
+    }
+
+    toast.success('User deleted successfully');
+    setDeleteDialogOpen(false);
+    setUserToDelete(null);
+    await workflowStore.syncFromDatabase();
   } catch (error) {
     console.error('Unexpected delete error:', error);
     toast.error('Something went wrong while deleting');

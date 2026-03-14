@@ -22,20 +22,30 @@ export function AppHeader() {
   const workflowActions = useWorkflowActions();
   const router = useRouter();
   const [search, setSearch] = useState('');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  const handleLogout = () => {
-    workflowActions.logout();
-    router.push('/auth/login');
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+
+    try {
+      setIsLoggingOut(true);
+      await workflowActions.logout();
+      router.replace('/auth/login');
+      router.refresh();
+    } catch (error) {
+      console.error('Logout failed:', error);
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   if (!currentUser) return null;
 
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-white px-6">
-      {/* Logo (visible on mobile when sidebar is hidden) */}
       <div className="flex items-center lg:hidden">
-        <svg 
-          viewBox="0 0 708.98 174.63" 
+        <svg
+          viewBox="0 0 708.98 174.63"
           className="h-7 w-auto text-primary"
           aria-label="Unilever"
         >
@@ -46,7 +56,6 @@ export function AppHeader() {
         </svg>
       </div>
 
-      {/* Search */}
       <div className="flex flex-1 items-center gap-4">
         <div className="relative w-96">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -60,27 +69,24 @@ export function AppHeader() {
         </div>
       </div>
 
-      {/* Right side */}
       <div className="flex items-center gap-2">
-        {/* Notifications */}
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="h-5 w-5" />
           <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-destructive" />
         </Button>
 
-        {/* User Menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="rounded-full">
               <Avatar>
                 <AvatarFallback className="bg-primary text-primary-foreground">
-{currentUser?.name
-  ? currentUser.name
-      .split(' ')
-      .map((n) => n?.[0] ?? '')
-      .join('')
-      .toUpperCase()
-  : 'U'}
+                  {currentUser?.name
+                    ? currentUser.name
+                        .split(' ')
+                        .map((n) => n?.[0] ?? '')
+                        .join('')
+                        .toUpperCase()
+                    : 'U'}
                 </AvatarFallback>
               </Avatar>
             </Button>
@@ -89,16 +95,18 @@ export function AppHeader() {
             <DropdownMenuLabel>
               <div>
                 <p className="font-medium">{currentUser?.name ?? 'User'}</p>
-                <p className="text-xs font-normal text-muted-foreground">{currentUser?.email ?? ''}</p>
+                <p className="text-xs font-normal text-muted-foreground">
+                  {currentUser?.email ?? ''}
+                </p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => router.push('/profile')}>
               Profile Settings
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleLogout}>
+            <DropdownMenuItem onClick={handleLogout} disabled={isLoggingOut}>
               <LogOut className="mr-2 h-4 w-4" />
-              Logout
+              {isLoggingOut ? 'Logging out...' : 'Logout'}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
