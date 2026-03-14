@@ -156,7 +156,7 @@ export default function ContractorDashboardPage() {
           </div>
           <div className="flex gap-2">
             <Button asChild>
-              <Link href="/permits/new">
+              <Link href="/moc">
                 <Plus className="mr-2 h-4 w-4" />
                 New PTW
               </Link>

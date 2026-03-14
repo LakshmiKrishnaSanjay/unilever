@@ -193,7 +193,7 @@ export default function PermitsPage() {
                       <TableCell>{ptw.revision_number}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          {ptw.status === 'REJECTED' &&
+                          {ptw.status === 'SENT_BACK' &&
                             ptw.sent_back_to_role === 'contractor_admin' && (
                               <Button size="sm" onClick={() => setResubmitDialog(ptw)}>
                                 Resubmit

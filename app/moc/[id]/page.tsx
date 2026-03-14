@@ -36,11 +36,12 @@ export default function MOCDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { currentUser } = useWorkflow();
+  const {ptws = [], currentUser } = useWorkflow();
   const [moc, setMoc] = useState<MOCRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [userSignature, setUserSignature] = useState<string | null>(null);
   const [contractorCompanyName, setContractorCompanyName] = useState('');
+  const ptwExistsForMoc = ptws.some((p) => p.moc_id === moc?.id);
 
   // Dialog states
   const [showFacilitiesApprovalDialog, setShowFacilitiesApprovalDialog] = useState(false);
@@ -466,7 +467,15 @@ console.log('contractor signature:', moc?.contractorGate?.signature);
             </p>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-3">
+
+            {isApproved && isContractorAdmin && !ptwExistsForMoc && (
+              <Button onClick={() => router.push(`/permits/new?mocId=${moc.id}`)}>
+                <FileText className="mr-2 h-4 w-4" />
+                Create PTW
+                </Button>
+              )}
+
             <Button variant="outline" size="sm">
               <Printer className="mr-2 h-4 w-4" />
               Print
@@ -979,18 +988,6 @@ console.log('contractor signature:', moc?.contractorGate?.signature);
             Back to MOC List
           </Button>
 
-          <div className="flex flex-col items-end gap-2">
-            <div className="text-sm text-red-500">
-              status: {moc.status} | role: {currentUser?.role} | approved: {String(isApproved)}
-            </div>
-
-            {isApproved && isContractorAdmin && (
-              <Button onClick={() => router.push(`/permits/new?mocId=${moc.id}`)}>
-                <FileText className="mr-2 h-4 w-4" />
-                Create PTW
-              </Button>
-            )}
-          </div>
         </div>
       </div>
 

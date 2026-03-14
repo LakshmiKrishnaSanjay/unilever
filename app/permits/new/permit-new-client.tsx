@@ -4,10 +4,9 @@ import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { PERMIT_FORMS, PERMIT_FORM_NAMES } from "@/components/permits/forms";
-import type { PermitType , Worker  } from "@/lib/types";
-import { supabase } from "@/lib/supabase-client"; // <-- change if your file path differs
-
-const DRAFT_KEY = "ptw_create_draft_v1";
+import type { PermitType, Worker } from "@/lib/types";
+import { supabase } from "@/lib/supabase-client";
+import { useWorkflowActions } from "@/lib/use-workflow";
 
 function isPermitType(value: string): value is PermitType {
   return (
@@ -21,233 +20,214 @@ function isPermitType(value: string): value is PermitType {
   );
 }
 
+function createEmptyWorker(): Worker {
+  return {
+    name: "",
+    idPassport: "",
+    role: "",
+    contact: "",
+    badge: "",
+  };
+}
+
 export default function PermitNewClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const workflowActions = useWorkflowActions();
+
   const mocId = searchParams.get("mocId") ?? undefined;
 
   const [permitType, setPermitType] = React.useState<PermitType>("HOT_WORK");
   const [data, setData] = React.useState<any>({});
   const [savedAt, setSavedAt] = React.useState<string | null>(null);
 
-  // DB fields (minimal required)
   const [title, setTitle] = React.useState("");
   const [location, setLocation] = React.useState("");
   const [start_datetime, setStartDatetime] = React.useState("");
   const [end_datetime, setEndDatetime] = React.useState("");
 
-  // optional flags
   const [requires_facilities_review, setRequiresFacilitiesReview] = React.useState(false);
   const [requires_efs_review, setRequiresEfsReview] = React.useState(false);
 
-  const [workers, setWorkers] = React.useState<Worker[]>([
-  {
-    name: "",
-    idPassport: "",
-    role: "",
-    contact: "",
-    badge: "",
-  },
-]);
+  const [workers, setWorkers] = React.useState<Worker[]>([createEmptyWorker()]);
 
+  const [draftId, setDraftId] = React.useState<string | null>(null);
+  const [savingDraft, setSavingDraft] = React.useState(false);
+  const [clearingDraft, setClearingDraft] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
 
-  React.useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
+  const FormComponent = PERMIT_FORMS[permitType];
 
-      const parsed = JSON.parse(raw);
+  const addWorker = () => {
+    setWorkers((prev) => [...prev, createEmptyWorker()]);
+  };
 
-      if (parsed?.permitType && isPermitType(parsed.permitType)) {
-        setPermitType(parsed.permitType);
-      }
-      if (parsed?.data) setData(parsed.data);
+  const removeWorker = (index: number) => {
+    setWorkers((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      return next.length > 0 ? next : [createEmptyWorker()];
+    });
+  };
 
-      // restore extra fields if present
-      if (typeof parsed?.title === "string") setTitle(parsed.title);
-      if (typeof parsed?.location === "string") setLocation(parsed.location);
-      if (typeof parsed?.start_datetime === "string") setStartDatetime(parsed.start_datetime);
-      if (typeof parsed?.end_datetime === "string") setEndDatetime(parsed.end_datetime);
-      if (typeof parsed?.requires_facilities_review === "boolean")
-        setRequiresFacilitiesReview(parsed.requires_facilities_review);
-      if (typeof parsed?.requires_efs_review === "boolean") setRequiresEfsReview(parsed.requires_efs_review);
-      if (Array.isArray(parsed?.workers)) setWorkers(parsed.workers);
-    } catch {}
-  }, []);
+  const updateWorker = (
+    index: number,
+    field: keyof Worker,
+    value: string
+  ) => {
+    setWorkers((prev) =>
+      prev.map((worker, i) =>
+        i === index ? { ...worker, [field]: value } : worker
+      )
+    );
+  };
 
-  React.useEffect(() => {
-    try {
-      sessionStorage.setItem(
-        DRAFT_KEY,
-        JSON.stringify({
-          mocId,
-          permitType,
-          data,
+  const buildPayload = React.useCallback(() => {
+    const cleanedWorkers: Worker[] = workers.map((w, idx) => ({
+      name: w.name?.trim() || "",
+      idPassport: w.idPassport?.trim() || "",
+      role: w.role?.trim() || "",
+      contact: w.contact?.trim() || "",
+      badge: w.badge?.trim() || `W${String(idx + 1).padStart(3, "0")}`,
+      badge_id: (w as any).badge_id ?? null,
+      badgeId: (w as any).badgeId ?? null,
+    }));
 
-          // extra fields saved in draft
-          title,
-          location,
-          start_datetime,
-          end_datetime,
-          requires_facilities_review,
-          requires_efs_review,
-          workers,
-
-          updatedAt: new Date().toISOString(),
-        })
-      );
-    } catch {}
+    return {
+      id: draftId ?? undefined,
+      moc_id: mocId ?? null,
+      title: title.trim() || null,
+      permit_type: permitType,
+      location: location.trim() || null,
+      start_datetime: start_datetime || null,
+      end_datetime: end_datetime || null,
+      requires_facilities_review,
+      requires_efs_review,
+      requires_stakeholder_closure: false,
+      worker_list: cleanedWorkers,
+      supporting_permit: FormComponent ? { type: permitType, data } : null,
+    };
   }, [
+    draftId,
     mocId,
-    permitType,
-    data,
     title,
+    permitType,
     location,
     start_datetime,
     end_datetime,
     requires_facilities_review,
     requires_efs_review,
     workers,
+    FormComponent,
+    data,
   ]);
 
-  const FormComponent = PERMIT_FORMS[permitType];
-
-  const clearDraft = () => {
-    sessionStorage.removeItem(DRAFT_KEY);
+  const resetForm = React.useCallback(() => {
+    setDraftId(null);
+    setPermitType("HOT_WORK");
     setData({});
     setSavedAt(null);
-
     setTitle("");
     setLocation("");
     setStartDatetime("");
     setEndDatetime("");
     setRequiresFacilitiesReview(false);
     setRequiresEfsReview(false);
-      setWorkers([
-    {
-      name: "",
-      idPassport: "",
-      role: "",
-      contact: "",
-      badge: "",
-    },
-  ]);
-  };
+    setWorkers([createEmptyWorker()]);
+  }, []);
 
-  const manualSave = () => {
-    setSavedAt(new Date().toLocaleString());
-    toast.success("Draft saved locally");
-  };
-
-  const addWorker = () => {
-  setWorkers((prev) => [
-    ...prev,
-    {
-      name: "",
-      idPassport: "",
-      role: "",
-      contact: "",
-      badge: "",
-    },
-  ]);
-};
-
-const removeWorker = (index: number) => {
-  setWorkers((prev) => prev.filter((_, i) => i !== index));
-};
-
-const updateWorker = (
-  index: number,
-  field: keyof Worker,
-  value: string
-) => {
-  setWorkers((prev) =>
-    prev.map((worker, i) =>
-      i === index ? { ...worker, [field]: value } : worker
-    )
-  );
-};
-
-  const submitToDB = async () => {
-    // Your API you shared earlier requires moc_id + required fields
+  const handleSaveDraft = async () => {
     if (!mocId) {
       toast.error("Missing mocId in URL");
       return;
     }
 
-    if (!title.trim()) return toast.error("Title is required");
-    if (!location.trim()) return toast.error("Location is required");
-    if (!start_datetime) return toast.error("Start date/time is required");
-    if (!end_datetime) return toast.error("End date/time is required");
-
-    setSubmitting(true);
     try {
-      // Get token (same pattern as your createPTW function)
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) {
-        toast.error("Not authenticated");
+      setSavingDraft(true);
+
+      const res = await workflowActions.savePTWDraft(buildPayload());
+
+      if (!res.success) {
+        toast.error(res.error || "Failed to save draft");
         return;
       }
 
-      const cleanedWorkers: Worker[] = workers
-  .map((w, idx) => ({
-    name: w.name?.trim() || "",
-    idPassport: w.idPassport?.trim() || "",
-    role: w.role?.trim() || "",
-    contact: w.contact?.trim() || "",
-    badge: `W${String(idx + 1).padStart(3, "0")}`,
-  }))
-  .filter((w) => w.name || w.idPassport || w.role || w.contact);
+      if (res.id) {
+        setDraftId(res.id);
+        setSavedAt(new Date().toLocaleString());
+        toast.success("Draft saved successfully");
+        router.push(`/permits/${res.id}/edit`);
+        return;
+      }
 
-if (cleanedWorkers.length === 0) {
-  return toast.error("At least one worker is required");
-}
+      toast.success("Draft saved successfully");
+      setSavedAt(new Date().toLocaleString());
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || "Failed to save draft");
+    } finally {
+      setSavingDraft(false);
+    }
+  };
 
-const hasInvalidWorker = cleanedWorkers.some(
-  (w) => !w.name || !w.idPassport || !w.role || !w.contact
-);
+  const handleClearDraft = async () => {
+    try {
+      setClearingDraft(true);
 
-if (hasInvalidWorker) {
-  return toast.error("Please complete all worker fields");
-}
+      if (draftId) {
+        const res = await workflowActions.clearPTWDraft(draftId);
 
-      const payload = {
-        moc_id: mocId,
-        title: title.trim(),
-        permit_type: permitType,
-        location: location.trim(),
-        start_datetime,
-        end_datetime,
-        requires_facilities_review,
-        requires_efs_review,
-        worker_list: cleanedWorkers,
+        if (!res.success) {
+          toast.error(res.error || "Failed to clear draft");
+          return;
+        }
 
-        // matches your DB column `supporting_permit jsonb`
-        supporting_permit: FormComponent ? { type: permitType, data } : null,
-      };
+        toast.success("Draft cleared successfully");
+        resetForm();
+        router.replace(`/permits/new${mocId ? `?mocId=${mocId}` : ""}`);
+        return;
+      }
 
-      const res = await fetch("/api/admin/permit/create", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      resetForm();
+      toast.success("Form cleared");
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || "Failed to clear draft");
+    } finally {
+      setClearingDraft(false);
+    }
+  };
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Create PTW failed");
+  const handleSubmit = async () => {
+    if (!mocId) {
+      toast.error("Missing mocId in URL");
+      return;
+    }
 
-      const id = json?.id as string | undefined;
-      if (!id) throw new Error("No PTW id returned");
+    setSubmitting(true);
+    try {
+      let ptwId = draftId;
 
-      toast.success("PTW created successfully");
-      sessionStorage.removeItem(DRAFT_KEY);
+      if (!ptwId) {
+        const saveRes = await workflowActions.savePTWDraft(buildPayload());
 
-      // Go to detail page
-      router.push(`/permits`);
+        if (!saveRes.success || !saveRes.id) {
+          toast.error(saveRes.error || "Failed to save draft before submit");
+          return;
+        }
+
+        ptwId = saveRes.id;
+        setDraftId(ptwId);
+      }
+
+      const submitRes = await workflowActions.submitPTW(ptwId);
+
+      if (!submitRes.success) {
+        toast.error(submitRes.error || "Failed to submit PTW");
+        return;
+      }
+
+      toast.success("PTW submitted successfully");
+      router.push(`/permits/${ptwId}`);
     } catch (e: any) {
       console.error(e);
       toast.error(e.message || "Failed to create PTW");
@@ -255,40 +235,39 @@ if (hasInvalidWorker) {
       setSubmitting(false);
     }
   };
-React.useEffect(() => {
-  const getProfile = async () => {
-    const { data: authData } = await supabase.auth.getUser();
-    if (!authData?.user) return;
 
-    const { data: profile, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("auth_id", authData.user.id)
-      .single();
+  React.useEffect(() => {
+    const getProfile = async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData?.user) return;
 
-    if (error) {
-      console.error("Profile fetch error:", error);
-      return;
-    }
+      const { data: profile, error } = await supabase
+        .from("users")
+        .select("*")
+        .eq("auth_id", authData.user.id)
+        .single();
 
-    console.log("DB profile:", profile);
-  };
+      if (error) {
+        console.error("Profile fetch error:", error);
+        return;
+      }
 
-  getProfile();
-}, []);
+      console.log("DB profile:", profile);
+    };
 
+    getProfile();
+  }, []);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 p-6">
       <div>
         <h1 className="text-xl font-semibold">Create PTW</h1>
         <p className="text-sm text-muted-foreground">
-          {mocId ? `Linked MOC: ${mocId}` : "No MOC linked (optional)"}
+          {mocId ? `Linked MOC: ${mocId}` : "No MOC linked"}
         </p>
       </div>
 
-      {/* Basic PTW fields */}
-      <div className="grid gap-3 max-w-xl">
+      <div className="grid max-w-xl gap-3">
         <label className="text-sm font-medium">Title</label>
         <input
           className="h-10 rounded-md border bg-background px-3 text-sm"
@@ -325,7 +304,13 @@ React.useEffect(() => {
         <select
           className="h-10 rounded-md border bg-background px-3 text-sm"
           value={permitType}
-          onChange={(e) => setPermitType(e.target.value as PermitType)}
+          onChange={(e) => {
+            const next = e.target.value;
+            if (isPermitType(next)) {
+              setPermitType(next);
+              setData({});
+            }
+          }}
         >
           <option value="HOT_WORK">{PERMIT_FORM_NAMES.HOT_WORK}</option>
           <option value="WORK_AT_HEIGHT">{PERMIT_FORM_NAMES.WORK_AT_HEIGHT}</option>
@@ -363,117 +348,119 @@ React.useEffect(() => {
         <div className="flex items-center gap-3 pt-2">
           <button
             className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60"
-            onClick={manualSave}
+            onClick={handleSaveDraft}
             type="button"
-            disabled={submitting}
+            disabled={savingDraft || submitting || clearingDraft}
           >
-            Save Draft
+            {savingDraft ? "Saving..." : "Save Draft"}
           </button>
 
           <button
             className="inline-flex h-9 items-center justify-center rounded-md border px-4 text-sm disabled:opacity-60"
-            onClick={clearDraft}
+            onClick={handleClearDraft}
             type="button"
-            disabled={submitting}
+            disabled={savingDraft || submitting || clearingDraft}
           >
-            Clear Draft
+            {clearingDraft ? "Clearing..." : "Clear Draft"}
           </button>
 
           <button
             className="inline-flex h-9 items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background disabled:opacity-60"
-            onClick={submitToDB}
+            onClick={handleSubmit}
             type="button"
-            disabled={submitting}
+            disabled={savingDraft || submitting || clearingDraft}
           >
             {submitting ? "Submitting..." : "Submit PTW"}
           </button>
 
-          {savedAt && <span className="text-xs text-muted-foreground">Saved: {savedAt}</span>}
+          {savedAt && (
+            <span className="text-xs text-muted-foreground">
+              Saved: {savedAt}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Supporting form */}
       <div className="rounded-lg border p-4">
-        <div className="text-sm font-medium mb-2">Form</div>
+        <div className="mb-2 text-sm font-medium">Form</div>
 
         {!FormComponent ? (
-          <div className="text-sm text-muted-foreground">No supporting form for this permit type.</div>
+          <div className="text-sm text-muted-foreground">
+            No supporting form for this permit type.
+          </div>
         ) : (
           <FormComponent data={data} onChange={(next: any) => setData(next)} readOnly={false} />
         )}
       </div>
 
-
-      <div className="rounded-lg border p-4 space-y-4 max-w-4xl">
-  <div className="flex items-center justify-between">
-    <div className="text-sm font-medium">Workers</div>
-    <button
-      type="button"
-      onClick={addWorker}
-      className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm"
-    >
-      Add Worker
-    </button>
-  </div>
-
-  {workers.map((worker, index) => (
-    <div key={index} className="grid gap-3 rounded-md border p-3 md:grid-cols-2">
-      <div>
-        <label className="text-sm font-medium">Worker Name</label>
-        <input
-          className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
-          value={worker.name}
-          onChange={(e) => updateWorker(index, "name", e.target.value)}
-          placeholder="Worker name"
-        />
-      </div>
-
-      <div>
-        <label className="text-sm font-medium">ID / Passport</label>
-        <input
-          className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
-          value={worker.idPassport || ""}
-          onChange={(e) => updateWorker(index, "idPassport", e.target.value)}
-          placeholder="ID / passport"
-        />
-      </div>
-
-      <div>
-        <label className="text-sm font-medium">Role</label>
-        <input
-          className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
-          value={worker.role}
-          onChange={(e) => updateWorker(index, "role", e.target.value)}
-          placeholder="Role"
-        />
-      </div>
-
-      <div>
-        <label className="text-sm font-medium">Contact</label>
-        <input
-          className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
-          value={worker.contact || ""}
-          onChange={(e) => updateWorker(index, "contact", e.target.value)}
-          placeholder="Contact number"
-        />
-      </div>
-
-      {workers.length > 1 && (
-        <div className="md:col-span-2">
+      <div className="max-w-4xl space-y-4 rounded-lg border p-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium">Workers</div>
           <button
             type="button"
-            onClick={() => removeWorker(index)}
-            className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm text-red-600"
+            onClick={addWorker}
+            className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm"
           >
-            Remove Worker
+            Add Worker
           </button>
         </div>
-      )}
-    </div>
-  ))}
-</div>
 
-      
+        {workers.map((worker, index) => (
+          <div key={index} className="grid gap-3 rounded-md border p-3 md:grid-cols-2">
+            <div>
+              <label className="text-sm font-medium">Worker Name</label>
+              <input
+                className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={worker.name}
+                onChange={(e) => updateWorker(index, "name", e.target.value)}
+                placeholder="Worker name"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">ID / Passport</label>
+              <input
+                className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={worker.idPassport || ""}
+                onChange={(e) => updateWorker(index, "idPassport", e.target.value)}
+                placeholder="ID / passport"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Role</label>
+              <input
+                className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={worker.role}
+                onChange={(e) => updateWorker(index, "role", e.target.value)}
+                placeholder="Role"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Contact</label>
+              <input
+                className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={worker.contact || ""}
+                onChange={(e) => updateWorker(index, "contact", e.target.value)}
+                placeholder="Contact number"
+              />
+            </div>
+
+            {workers.length > 1 && (
+              <div className="md:col-span-2">
+                <button
+                  type="button"
+                  onClick={() => removeWorker(index)}
+                  className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm text-red-600"
+                >
+                  Remove Worker
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

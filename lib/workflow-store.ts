@@ -2107,17 +2107,26 @@ async submitPTW(id: string): Promise<{ success: boolean; error?: string }> {
   try {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
-    if (!token) return { success: false, error: "Not authenticated" };
+
+    if (!token) {
+      return { success: false, error: "Not authenticated" };
+    }
 
     const res = await fetch(`/api/admin/permit/${id}/submit`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     });
 
     const json = await res.json();
-    if (!res.ok) return { success: false, error: json?.error || "Submit failed" };
+
+    if (!res.ok) {
+      return { success: false, error: json?.error || "Submit failed" };
+    }
 
     await this.syncFromDatabase();
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || "Submit failed" };
@@ -2128,17 +2137,26 @@ async clearPTWDraft(id: string): Promise<{ success: boolean; error?: string }> {
   try {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
-    if (!token) return { success: false, error: "Not authenticated" };
+
+    if (!token) {
+      return { success: false, error: "Not authenticated" };
+    }
 
     const res = await fetch(`/api/admin/permit/draft/${id}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     });
 
     const json = await res.json();
-    if (!res.ok) return { success: false, error: json?.error || "Delete draft failed" };
+
+    if (!res.ok) {
+      return { success: false, error: json?.error || "Delete draft failed" };
+    }
 
     await this.syncFromDatabase();
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || "Delete draft failed" };
@@ -2146,12 +2164,15 @@ async clearPTWDraft(id: string): Promise<{ success: boolean; error?: string }> {
 }
 
 async savePTWDraft(
-  payload: any // or a proper type
+  payload: any
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
-    if (!token) return { success: false, error: "Not authenticated" };
+
+    if (!token) {
+      return { success: false, error: "Not authenticated" };
+    }
 
     const res = await fetch("/api/admin/permit/draft", {
       method: "POST",
@@ -2159,13 +2180,17 @@ async savePTWDraft(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload), // include id if exists
+      body: JSON.stringify(payload),
     });
 
     const json = await res.json();
-    if (!res.ok) return { success: false, error: json?.error || "Save draft failed" };
+
+    if (!res.ok) {
+      return { success: false, error: json?.error || "Save draft failed" };
+    }
 
     await this.syncFromDatabase();
+
     return { success: true, id: json?.id };
   } catch (err: any) {
     return { success: false, error: err.message || "Save draft failed" };

@@ -88,7 +88,7 @@ const roleNavigations: Record<Role, NavItem[]> = {
     { title: 'Dashboard', href: '/contractor/dashboard', icon: LayoutDashboard },
     { title: 'My MOCs', href: '/moc', icon: FileText },
     { title: 'My PTWs', href: '/permits', icon: FileCheck },
-    { title: 'Create PTW', href: '/permits/new', icon: Upload },
+    { title: 'Drafts', href: '/permits/drafts', icon: Upload },
   ],
   contractor_supervisor: [
     { title: 'Dashboard', href: '/contractor-supervisor/dashboard', icon: LayoutDashboard },

@@ -74,12 +74,12 @@ export default function PermitResubmitPage({
 }) {
   const resolvedParams = use(params);
   const router = useRouter();
-  const { ptws = [], mocs = [], users = [], currentUser } = useWorkflow();
+  const { ptws = [], mocs = [], contractors = [], currentUser } = useWorkflow();
   const workflowActions = useWorkflowActions();
 
   const ptw = (ptws ?? []).find((p) => p.id === resolvedParams.id);
   const moc = (mocs ?? []).find((m) => m.id === ptw?.moc_id);
-  const contractor = (users ?? []).find((u) => u.id === ptw?.contractor_id);
+  const contractor = contractors.find((c) => c.id === ptw?.contractor_id);
 
   const [startDateTime, setStartDateTime] = useState(
     ptw ? toInputDateTimeValue(ptw.start_datetime) : ''
@@ -269,7 +269,7 @@ export default function PermitResubmitPage({
 
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Contractor</p>
-                    <p className="mt-1">{contractor?.name || 'Unknown'}</p>
+                    <p className="mt-1">{contractor?.companyName  || 'Unknown'}</p>
                   </div>
                 </div>
 
@@ -518,6 +518,15 @@ export default function PermitResubmitPage({
                       </div>
                     );
                   })}
+
+                                    {ptw.status === 'SENT_BACK' && (
+                    <div className="flex items-center gap-3">
+                      <div className="h-2 w-2 rounded-full bg-destructive" />
+                      <span className="text-sm font-medium text-destructive">
+                        Sent Back for Correction
+                      </span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

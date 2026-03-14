@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useRef } from 'react';
+import { use, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,14 +9,26 @@ import { Button } from '@/components/ui/button';
 import { useWorkflow, useWorkflowActions } from '@/lib/use-workflow';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { ChevronLeft, Clock, MapPin, FileText, Users, IdCard, Printer, Download, CheckCircle } from 'lucide-react';
+import {
+  ChevronLeft,
+  Clock,
+  MapPin,
+  FileText,
+  Users,
+  IdCard,
+  Printer,
+  Download,
+  CheckCircle,
+  Pencil,
+  Trash2,
+} from 'lucide-react';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { BadgeCard } from '@/components/badge-card';
 import { toast } from 'sonner';
-import { PERMIT_FORMS, PERMIT_FORM_NAMES } from '@/components/permits/forms';
+import { PERMIT_FORMS } from '@/components/permits/forms';
 
-const statusColors: Record<string, string> = {
+const statusColors: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   DRAFT: 'secondary',
   SUBMITTED: 'secondary',
   PENDING_SECURITY_REVIEW: 'outline',
@@ -32,12 +44,13 @@ const statusColors: Record<string, string> = {
   PENDING_STAKEHOLDER_CLOSURE: 'outline',
   PENDING_HSE_CLOSURE: 'outline',
   CLOSED: 'secondary',
+  SENT_BACK: 'destructive',
   REJECTED: 'destructive',
 };
 
 function formatDateTime(date: string | null | undefined): string {
-  if (!date) return "-";
-  return format(new Date(date), "yyyy-MM-dd HH:mm:ss");
+  if (!date) return '-';
+  return format(new Date(date), 'yyyy-MM-dd HH:mm:ss');
 }
 
 export default function PermitDetailPage({
@@ -48,23 +61,37 @@ export default function PermitDetailPage({
   const resolvedParams = use(params);
   const router = useRouter();
   const badgeCardsRef = useRef<HTMLDivElement>(null);
-  const { ptws = [], mocs = [], users = [], currentUser } = useWorkflow();
 
-  
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isClearingDraft, setIsClearingDraft] = useState(false);
+  const [isMarkingComplete, setIsMarkingComplete] = useState(false);
+
+  const { ptws = [], mocs = [], contractors = [], currentUser } = useWorkflow();
   const workflowActions = useWorkflowActions();
 
-  const ptw = (ptws ?? []).find((p) => p.id === resolvedParams.id);
-  const moc = (mocs ?? []).find((m) => m.id === ptw?.moc_id);
-  const contractor = (users ?? []).find((u) => u.id === ptw?.contractor_id);
+  const ptw = ptws.find((p) => p.id === resolvedParams.id);
+  const moc = mocs.find((m) => m.id === ptw?.moc_id);
+  const contractor = contractors.find((c) => c.id === ptw?.contractor_id);
 
-  console.log("currentUser", currentUser);
-console.log("role", currentUser?.role);
-console.log("ptw status", ptw?.status);
-
-  // Check if badges are generated
   const hasBadges = ptw?.worker_list?.some((w: any) => w.badge_id || w.badgeId);
-  const isApproved = ptw?.status === 'READY_FOR_ENTRY' || ptw?.status === 'ACTIVE' || ptw?.status === 'WORK_COMPLETED';
-  const showBadges = hasBadges && isApproved && ptw?.worker_list && ptw.worker_list.length > 0;
+  const isApproved =
+    ptw?.status === 'READY_FOR_ENTRY' ||
+    ptw?.status === 'ACTIVE' ||
+    ptw?.status === 'WORK_COMPLETED';
+  const showBadges =
+    !!hasBadges &&
+    !!isApproved &&
+    !!ptw?.worker_list &&
+    ptw.worker_list.length > 0;
+
+  const canManageDraft =
+    currentUser?.role === 'contractor_admin' && ptw?.status === 'DRAFT';
+
+  const canResubmit =
+    currentUser?.role === 'contractor_admin' && ptw?.status === 'SENT_BACK';
+
+  const canMarkWorkComplete =
+    currentUser?.role === 'contractor_admin' && ptw?.status === 'ACTIVE';
 
   const handlePrintBadges = () => {
     const printContent = badgeCardsRef.current;
@@ -111,22 +138,19 @@ console.log("ptw status", ptw?.status);
 
     try {
       toast.info('Generating PDF...');
-      
-      // Dynamically import libraries
+
       const html2canvas = (await import('html2canvas')).default;
       const { jsPDF } = await import('jspdf');
 
-      // Capture the element as canvas
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
         logging: false,
       });
 
-      // Calculate PDF dimensions
-      const imgWidth = 210; // A4 width in mm
+      const imgWidth = 210;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      
+
       const pdf = new jsPDF({
         orientation: imgHeight > imgWidth ? 'portrait' : 'landscape',
         unit: 'mm',
@@ -135,8 +159,7 @@ console.log("ptw status", ptw?.status);
 
       const imgData = canvas.toDataURL('image/png');
       pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-      
-      // Download with filename
+
       pdf.save(`GatePass-${resolvedParams.id}.pdf`);
       toast.success('PDF downloaded successfully');
     } catch (error) {
@@ -145,30 +168,77 @@ console.log("ptw status", ptw?.status);
     }
   };
 
-  const handleMarkWorkComplete = () => {
+  const handleMarkWorkComplete = async () => {
     if (!ptw) return;
-    
+
     if (ptw.status !== 'ACTIVE') {
       toast.error('Can only mark ACTIVE PTWs as completed');
       return;
     }
 
-    workflowActions.markWorkCompleted(ptw.id);
-    toast.success('Work marked as completed. Notifications sent to reviewers.');
+    try {
+      setIsMarkingComplete(true);
+      await workflowActions.markWorkCompleted(ptw.id);
+      toast.success('Work marked as completed. Notifications sent to reviewers.');
+      router.refresh();
+    } catch (error) {
+      console.error('Mark work complete failed:', error);
+      toast.error('Failed to mark work as completed');
+    } finally {
+      setIsMarkingComplete(false);
+    }
   };
 
-const handleSubmitPermit = async () => {
-  if (!ptw) return;
+  const handleSubmitPermit = async () => {
+    if (!ptw) return;
 
-  const res = await workflowActions.submitPTW(ptw.id);
-  if (!res.success) {
-    toast.error(res.error || "Submit failed");
-    return;
-  }
+    try {
+      setIsSubmitting(true);
 
-  toast.success("Permit submitted");
-  router.refresh(); // forces UI refresh in Next
-};
+      const res = await workflowActions.submitPTW(ptw.id);
+      if (!res.success) {
+        toast.error(res.error || 'Submit failed');
+        return;
+      }
+
+      toast.success('Permit submitted to Security Review');
+      router.refresh();
+    } catch (error) {
+      console.error('Submit permit failed:', error);
+      toast.error('Submit failed');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleClearDraft = async () => {
+    if (!ptw) return;
+
+    const confirmed = window.confirm(
+      'Are you sure you want to clear this draft? This action cannot be undone.'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setIsClearingDraft(true);
+
+      const res = await workflowActions.clearPTWDraft(ptw.id);
+      if (!res.success) {
+        toast.error(res.error || 'Failed to clear draft');
+        return;
+      }
+
+      toast.success('Draft cleared successfully');
+      router.push('/permits');
+      router.refresh();
+    } catch (error) {
+      console.error('Clear draft failed:', error);
+      toast.error('Failed to clear draft');
+    } finally {
+      setIsClearingDraft(false);
+    }
+  };
 
   if (!ptw) {
     return (
@@ -186,47 +256,85 @@ const handleSubmitPermit = async () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" asChild>
-
+        <div className="flex items-start gap-4">
+          <Button variant="outline" size="icon" onClick={() => router.back()}>
+            <ChevronLeft className="h-4 w-4" />
           </Button>
+
           <div className="flex-1">
-            <h1 className="text-3xl font-semibold">{ptw.title}</h1>
+            <h1 className="text-3xl font-semibold">{ptw.title || 'Untitled Permit'}</h1>
             <p className="text-sm text-muted-foreground">{ptw.id}</p>
           </div>
-{/* Submit Button for DRAFT */}
-{ptw.status === 'DRAFT' && currentUser?.role === 'contractor_admin' && (
-  <Button onClick={handleSubmitPermit}>
-    <FileText className="mr-2 h-4 w-4" />
-    Submit Permit
-  </Button>
-)}
 
-{/* Resubmit Button for SENT_BACK */}
-{ptw.status === 'SENT_BACK' && currentUser?.role === 'contractor_admin' && (
-  <Button asChild>
-    <Link href={`/permits/${ptw.id}/resubmit`}>
-      <FileText className="mr-2 h-4 w-4" />
-      Resubmit Permit
-    </Link>
-  </Button>
-)}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canManageDraft && (
+              <>
+                <Button variant="outline" asChild>
+                  <Link href={`/permits/${ptw.id}/edit`}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit Draft
+                  </Link>
+                </Button>
 
-{/* Mark Work Complete */}
-{ptw.status === 'ACTIVE' && currentUser?.role === 'contractor_admin' && (
-  <Button onClick={handleMarkWorkComplete}>
-    <CheckCircle className="mr-2 h-4 w-4" />
-    Mark Work Complete
-  </Button>
-)}
-          <Badge variant={statusColors[ptw.status] as any} className="text-sm">
-            {ptw.status.replace(/_/g, ' ')}
-          </Badge>
+                <Button
+                  variant="destructive"
+                  onClick={handleClearDraft}
+                  disabled={isClearingDraft}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {isClearingDraft ? 'Clearing...' : 'Clear Draft'}
+                </Button>
+
+                <Button onClick={handleSubmitPermit} disabled={isSubmitting}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  {isSubmitting ? 'Submitting...' : 'Submit Permit'}
+                </Button>
+              </>
+            )}
+
+            {canResubmit && (
+              <Button asChild>
+                <Link href={`/permits/${ptw.id}/resubmit`}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Resubmit Permit
+                </Link>
+              </Button>
+            )}
+
+            {canMarkWorkComplete && (
+              <Button onClick={handleMarkWorkComplete} disabled={isMarkingComplete}>
+                <CheckCircle className="mr-2 h-4 w-4" />
+                {isMarkingComplete ? 'Updating...' : 'Mark Work Complete'}
+              </Button>
+            )}
+
+            <Badge
+              variant={statusColors[ptw.status] ?? 'secondary'}
+              className="text-sm"
+            >
+              {ptw.status.replace(/_/g, ' ')}
+            </Badge>
+          </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-6">
-            {/* Basic Info */}
+          <div className="space-y-6 lg:col-span-2">
+                        {ptw.status === 'SENT_BACK' && ptw.sent_back_reason && (
+              <Card className="border-destructive">
+                <CardHeader>
+                  <CardTitle className="text-destructive">Corrections Required</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm">{ptw.sent_back_reason}</p>
+
+                  {ptw.sent_back_to_role && (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Sent back to: {ptw.sent_back_to_role}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
             <Card>
               <CardHeader>
                 <CardTitle>Permit Details</CardTitle>
@@ -235,22 +343,25 @@ const handleSubmitPermit = async () => {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Permit Type</p>
-                    <p className="mt-1">{ptw.permit_type.replace('_', ' ')}</p>
+                    <p className="mt-1">{ptw.permit_type?.replace(/_/g, ' ') || '-'}</p>
                   </div>
+
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Revision</p>
-                    <p className="mt-1">Rev {ptw.revision_number}</p>
+                    <p className="mt-1">Rev {ptw.revision_number ?? 0}</p>
                   </div>
+
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Location</p>
                     <div className="mt-1 flex items-center gap-2">
                       <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <p>{ptw.location}</p>
+                      <p>{ptw.location || '-'}</p>
                     </div>
                   </div>
+
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Contractor</p>
-                    <p className="mt-1">{contractor?.name || 'Unknown'}</p>
+                    <p className="mt-1">{contractor?.companyName  || 'Unknown'}</p>
                   </div>
                 </div>
 
@@ -264,6 +375,7 @@ const handleSubmitPermit = async () => {
                       <p>{formatDateTime(ptw.start_datetime)}</p>
                     </div>
                   </div>
+
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">End Date & Time</p>
                     <div className="mt-1 flex items-center gap-2">
@@ -285,7 +397,6 @@ const handleSubmitPermit = async () => {
               </CardContent>
             </Card>
 
-            {/* MOC Reference */}
             <Card>
               <CardHeader>
                 <CardTitle>Related MOC</CardTitle>
@@ -298,11 +409,7 @@ const handleSubmitPermit = async () => {
                         <p className="font-medium">{moc.title}</p>
                         <p className="text-sm text-muted-foreground">{moc.id}</p>
                       </div>
-                      <Badge
-                        variant={moc.priority === 'CRITICAL' ? 'destructive' : 'secondary'}
-                      >
-                        {moc.priority}
-                      </Badge>
+             
                     </div>
                     <p className="text-sm text-muted-foreground">{moc.scope}</p>
                     <Button variant="outline" size="sm" asChild>
@@ -315,13 +422,10 @@ const handleSubmitPermit = async () => {
               </CardContent>
             </Card>
 
-            {/* Supporting Permit Form */}
             {ptw.supporting_permit && ptw.permit_type !== 'MASTER' && (
               <Card>
                 <CardHeader>
-                  {/* <CardTitle>
-                    {PERMIT_FORM_NAMES[ptw.permit_type]}
-                  </CardTitle> */}
+                  <CardTitle>Supporting Permit Form</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {(() => {
@@ -333,6 +437,7 @@ const handleSubmitPermit = async () => {
                         </p>
                       );
                     }
+
                     return (
                       <FormComponent
                         data={ptw.supporting_permit.data}
@@ -345,7 +450,6 @@ const handleSubmitPermit = async () => {
               </Card>
             )}
 
-            {/* Worker List */}
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-2">
@@ -354,23 +458,27 @@ const handleSubmitPermit = async () => {
                 </div>
               </CardHeader>
               <CardContent>
-              {(ptw.worker_list ?? []).length > 0 ? (
-                <div className="space-y-2">
-                  {(ptw.worker_list ?? []).map((worker, index) => (
+                {(ptw.worker_list ?? []).length > 0 ? (
+                  <div className="space-y-2">
+                    {(ptw.worker_list ?? []).map((worker, index) => (
                       <div
                         key={index}
                         className="flex items-center justify-between rounded-lg border p-3"
                       >
                         <div>
-                          <p className="font-medium">{worker.name}</p>
-                          <p className="text-sm text-muted-foreground">{worker.role || 'Worker'}</p>
+                          <p className="font-medium">{worker.name || '-'}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {worker.role || 'Worker'}
+                          </p>
+
                           {(worker.badge_id || worker.badgeId) && (
-                            <p className="text-xs text-muted-foreground font-mono mt-1">
+                            <p className="mt-1 font-mono text-xs text-muted-foreground">
                               Badge: {worker.badge_id || worker.badgeId}
                             </p>
                           )}
                         </div>
-                        <Badge variant="outline">{worker.badge}</Badge>
+
+                        <Badge variant="outline">{worker.badge || '-'}</Badge>
                       </div>
                     ))}
                   </div>
@@ -380,27 +488,29 @@ const handleSubmitPermit = async () => {
               </CardContent>
             </Card>
 
-            {/* Gate Pass / Badge Cards */}
             {showBadges && (
               <Card>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <IdCard className="h-5 w-5" />
                       <CardTitle>Gate Pass / Badge Cards</CardTitle>
                     </div>
-                    <div className="flex items-center gap-2 no-print">
+
+                    <div className="no-print flex items-center gap-2">
                       <Button variant="outline" size="sm" onClick={handlePrintBadges}>
-                        <Printer className="h-4 w-4 mr-2" />
+                        <Printer className="mr-2 h-4 w-4" />
                         Print All
                       </Button>
+
                       <Button variant="outline" size="sm" onClick={handleDownloadPDF}>
-                        <Download className="h-4 w-4 mr-2" />
+                        <Download className="mr-2 h-4 w-4" />
                         Download PDF
                       </Button>
                     </div>
                   </div>
                 </CardHeader>
+
                 <CardContent>
                   <Alert className="mb-6 border-green-600 bg-green-50 dark:bg-green-950/50">
                     <CheckCircle className="h-5 w-5 text-green-600" />
@@ -408,7 +518,7 @@ const handleSubmitPermit = async () => {
                       <p className="font-semibold text-green-900 dark:text-green-100">
                         Badge IDs generated - Ready for entry
                       </p>
-                      <p className="text-sm text-green-800 dark:text-green-200 mt-1">
+                      <p className="mt-1 text-sm text-green-800 dark:text-green-200">
                         Workers can use these badges for site access during the permitted period.
                       </p>
                     </AlertDescription>
@@ -424,7 +534,7 @@ const handleSubmitPermit = async () => {
                         location={ptw.location || 'Site Location'}
                         validityStart={new Date(ptw.start_datetime)}
                         validityEnd={new Date(ptw.end_datetime)}
-                        contractorCompany={contractor?.name || 'Contractor'}
+                        contractorCompany={contractor?.companyName  || 'Contractor'}
                       />
                     ))}
                   </div>
@@ -432,25 +542,9 @@ const handleSubmitPermit = async () => {
               </Card>
             )}
 
-            {/* Sent Back Reason */}
-            {ptw.status === 'REJECTED' && ptw.sent_back_reason && (
-              <Card className="border-destructive">
-                <CardHeader>
-                  <CardTitle className="text-destructive">Corrections Required</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm">{ptw.sent_back_reason}</p>
-                  {ptw.sent_back_to_role && (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Sent back to: {ptw.sent_back_to_role}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+
           </div>
 
-          {/* Sidebar */}
           <div className="space-y-6">
             <Card>
               <CardHeader>
@@ -461,18 +555,21 @@ const handleSubmitPermit = async () => {
                   <span className="text-sm">Security Review</span>
                   <Badge variant="outline">Required</Badge>
                 </div>
+
                 <div className="flex items-center justify-between">
                   <span className="text-sm">Facilities Review</span>
                   <Badge variant={ptw.requires_facilities_review ? 'outline' : 'secondary'}>
                     {ptw.requires_facilities_review ? 'Required' : 'Not Required'}
                   </Badge>
                 </div>
+
                 <div className="flex items-center justify-between">
                   <span className="text-sm">EFS Review</span>
                   <Badge variant={ptw.requires_efs_review ? 'outline' : 'secondary'}>
                     {ptw.requires_efs_review ? 'Required' : 'Not Required'}
                   </Badge>
                 </div>
+
                 <div className="flex items-center justify-between">
                   <span className="text-sm">HSE Final Review</span>
                   <Badge variant="outline">Required</Badge>
@@ -497,27 +594,27 @@ const handleSubmitPermit = async () => {
                     { status: 'ACTIVE', label: 'Active Work' },
                     { status: 'WORK_COMPLETED', label: 'Work Completed' },
                     { status: 'CLOSED', label: 'Closed' },
-                  ].map((step, index) => {
-                    const statuses = [
-                      'DRAFT',
-                      'SUBMITTED',
-                      'PENDING_SECURITY_REVIEW',
-                      'PENDING_FACILITIES_REVIEW',
-                      'PENDING_EFS_REVIEW',
-                      'PENDING_HSE_APPROVAL',
-                      'READY_FOR_ENTRY',
-                      'ACTIVE',
-                      'WORK_COMPLETED',
-                      'CLOSED',
-                    ];
+                  ].map((step, index, arr) => {
+                    const statuses = arr.map((item) => item.status);
                     const currentIndex = statuses.indexOf(ptw.status);
-                    const isPast = index < currentIndex;
-                    const isCurrent = step.status === ptw.status;
+                    const stepIndex = statuses.indexOf(step.status);
 
-                    // Skip optional reviews if not required
-                    if (step.status === 'PENDING_FACILITIES_REVIEW' && !ptw.requires_facilities_review)
+                    if (
+                      step.status === 'PENDING_FACILITIES_REVIEW' &&
+                      !ptw.requires_facilities_review
+                    ) {
                       return null;
-                    if (step.status === 'PENDING_EFS_REVIEW' && !ptw.requires_efs_review) return null;
+                    }
+
+                    if (
+                      step.status === 'PENDING_EFS_REVIEW' &&
+                      !ptw.requires_efs_review
+                    ) {
+                      return null;
+                    }
+
+                    const isPast = currentIndex > -1 && stepIndex < currentIndex;
+                    const isCurrent = step.status === ptw.status;
 
                     return (
                       <div key={step.status} className="flex items-center gap-3">
@@ -544,6 +641,15 @@ const handleSubmitPermit = async () => {
                       </div>
                     );
                   })}
+
+                  {ptw.status === 'SENT_BACK' && (
+                    <div className="flex items-center gap-3">
+                      <div className="h-2 w-2 rounded-full bg-destructive" />
+                      <span className="text-sm font-medium text-destructive">
+                        Sent Back for Correction
+                      </span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
