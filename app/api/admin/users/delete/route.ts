@@ -23,13 +23,11 @@ export async function POST(req: Request) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // 1. validate caller
     const { data: callerData, error: callerErr } = await supabaseAdmin.auth.getUser(token);
     if (callerErr || !callerData.user) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 });
     }
 
-    // 2. only super_admin can delete
     const { data: me, error: meErr } = await supabaseAdmin
       .from("users")
       .select("id, role")
@@ -44,10 +42,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // optional: prevent deleting self
     const { data: targetUser, error: targetErr } = await supabaseAdmin
       .from("users")
-      .select("id, auth_id, name")
+      .select("id, auth_id, name, role")
       .eq("id", userId)
       .single();
 
@@ -55,11 +52,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Target user not found" }, { status: 404 });
     }
 
-    if (targetUser.auth_id === callerData.user.id) {
-      return NextResponse.json({ error: "You cannot delete your own account" }, { status: 400 });
+    if (targetUser.role === "super_admin") {
+      return NextResponse.json(
+        { error: "Super Admin users cannot be deleted" },
+        { status: 403 }
+      );
     }
 
-    // 3. delete from auth.users first
+    if (targetUser.auth_id === callerData.user.id) {
+      return NextResponse.json(
+        { error: "You cannot delete your own account" },
+        { status: 400 }
+      );
+    }
+
     if (targetUser.auth_id) {
       const { error: authDeleteErr } = await supabaseAdmin.auth.admin.deleteUser(
         targetUser.auth_id
@@ -73,7 +79,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. delete from public.users
     const { error: dbDeleteErr } = await supabaseAdmin
       .from("users")
       .delete()
